@@ -21,7 +21,13 @@
   - `/home/max/MAX_CORP_CORE/AI_ROBOT/new/v2.0.5_otto-robot/merged-binary.bin`
 - Собственный профиль `gosha-otto-v1` уже создан как копия `otto-robot`.
 - Профиль уже виден в `scripts/release.py --list-boards`.
-- Полная сборка ещё не запускалась, потому что на машине пока не найден установленный `ESP-IDF`.
+- Рабочее окружение сборки уже поднято:
+  - `ESP-IDF 5.5.2`
+  - путь: `/home/max/esp/esp-idf-v5.5.2`
+- Первая полная сборка уже выполнена успешно.
+- Получены первые артефакты:
+  - `/home/max/GOSHA_FIRMWARE/firmware/build/merged-binary.bin`
+  - `/home/max/GOSHA_FIRMWARE/firmware/releases/v2.2.2_gosha-otto-v1.zip`
 
 ## Основная идея первой версии
 
@@ -38,4 +44,4 @@
 3. Подтвердить аппаратный манифест и pin map.
 4. Проверить аппаратный манифест и pin map.
 5. Проверить видимость `gosha-otto-v1` в сборочных инструментах.
-6. Собрать первый `merged-binary.bin`.
+6. Прошить одно тестовое устройство и пройти аппаратную проверку.
