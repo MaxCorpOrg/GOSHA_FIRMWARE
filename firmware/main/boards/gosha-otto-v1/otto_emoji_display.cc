@@ -13,15 +13,22 @@
 
 #define TAG "OttoEmojiDisplay"
 OttoEmojiDisplay::OttoEmojiDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, int width, int height, int offset_x, int offset_y, bool mirror_x, bool mirror_y, bool swap_xy)
-    : SpiLcdDisplay(panel_io, panel, width, height, offset_x, offset_y, mirror_x, mirror_y, swap_xy) {
-    InitializeOttoEmojis();
+    : SpiLcdDisplay(panel_io, panel, width, height, offset_x, offset_y, mirror_x, mirror_y, swap_xy) {}
+
+void OttoEmojiDisplay::SetupUI() {
+    LcdDisplay::SetupUI();
     SetupPreviewImage();
     SetTheme(LvglThemeManager::GetInstance().GetTheme("dark"));
+    InitializeOttoEmojis();
 }
 
 void OttoEmojiDisplay::SetupPreviewImage() {
+    if (preview_image_ == nullptr) {
+        ESP_LOGW(TAG, "Preview image is not created yet");
+        return;
+    }
     DisplayLockGuard lock(this);
-    lv_obj_set_size(preview_image_, width_ , height_ );
+    lv_obj_set_size(preview_image_, width_, height_);
 }
 
 void OttoEmojiDisplay::InitializeOttoEmojis() {

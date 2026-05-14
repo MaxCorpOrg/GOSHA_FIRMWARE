@@ -8,6 +8,7 @@
 #include <map>
 
 static const char* TAG = "WSControl";
+static constexpr uint16_t kWebSocketControlCtrlPort = 32769;
 
 WebSocketControlServer* WebSocketControlServer::instance_ = nullptr;
 
@@ -87,6 +88,7 @@ esp_err_t WebSocketControlServer::ws_handler(httpd_req_t *req) {
 bool WebSocketControlServer::Start(int port) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = port;
+    config.ctrl_port = kWebSocketControlCtrlPort;
     config.max_open_sockets = 7;
 
     httpd_uri_t ws_uri = {
@@ -99,7 +101,7 @@ bool WebSocketControlServer::Start(int port) {
 
     if (httpd_start(&server_handle_, &config) == ESP_OK) {
         httpd_register_uri_handler(server_handle_, &ws_uri);
-        ESP_LOGI(TAG, "WebSocket server started on port %d", port);
+        ESP_LOGI(TAG, "WebSocket server started on port %d, ctrl_port %d", port, config.ctrl_port);
         return true;
     }
 
