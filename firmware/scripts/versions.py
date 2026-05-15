@@ -143,7 +143,9 @@ def read_binary(dir_path):
     image_data = app_data[:image_size]
     
     # extract bin file
-    bin_path = os.path.join(dir_path, "xiaozhi.bin")
+    bin_path = os.path.join(dir_path, "gosha.bin")
+    if not os.path.exists(bin_path):
+        bin_path = os.path.join(dir_path, "xiaozhi.bin")
     if not os.path.exists(bin_path):
         print("extract bin file to", bin_path)
         open(bin_path, "wb").write(image_data)
@@ -235,7 +237,8 @@ def main():
                 info = read_binary(folder)
                 target_dir = os.path.join("firmwares", tag)
                 info["tag"] = tag
-                info["url"] = os.path.join(os.environ['OSS_BUCKET_URL'], target_dir, "xiaozhi.bin")
+                firmware_bin = "gosha.bin"
+                info["url"] = os.path.join(os.environ['OSS_BUCKET_URL'], target_dir, firmware_bin)
                 open(info_path, "w").write(json.dumps(info, indent=4))
                 # upload all file to oss
                 upload_dir_to_oss(folder, target_dir)

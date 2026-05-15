@@ -1,8 +1,8 @@
-menu "Xiaozhi Assistant"
+menu "GOSHA Firmware"
 
 config OTA_URL
     string "Default OTA URL"
-    default "http://151.241.228.232:18876/xiaozhi/ota/"
+    default "http://151.241.228.232:18876/gosha/ota/"
     help
         The application will access this URL to check for new firmwares and server address.
 
@@ -35,7 +35,7 @@ config CUSTOM_ASSETS_FILE
 
 choice
     prompt "Default Language"
-    default LANGUAGE_ZH_CN
+    default LANGUAGE_RU_RU
     help
         Select device display language
 
@@ -611,7 +611,7 @@ choice DISPLAY_STYLE
     prompt "Select display style"
     default USE_DEFAULT_MESSAGE_STYLE
     help
-        Select display style for Xiaozhi device
+        Select display style for GOSHA device
 
     config USE_DEFAULT_MESSAGE_STYLE
         bool "Enable default message style"

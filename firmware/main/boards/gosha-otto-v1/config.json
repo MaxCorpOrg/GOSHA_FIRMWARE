@@ -3,7 +3,9 @@
     "builds": [
         {
             "name": "gosha-otto-v1",
+            "board_name": "GOSHA",
             "sdkconfig_append": [
+                "CONFIG_LANGUAGE_RU_RU=y",
                 "CONFIG_HTTPD_WS_SUPPORT=y",
                 "CONFIG_CAMERA_OV2640=y",
                 "CONFIG_CAMERA_OV2640_AUTO_DETECT_DVP_INTERFACE_SENSOR=y",

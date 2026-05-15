@@ -54,7 +54,8 @@ void WifiBoard::StartNetwork() {
 
     // Initialize WiFi manager
     WifiManagerConfig config;
-    config.ssid_prefix = "Xiaozhi";
+    // Keep a stable product family marker while preserving the unique MAC suffix.
+    config.ssid_prefix = "GOSHA-A";
     config.language = Lang::CODE;
     wifi_manager.Initialize(config);
 

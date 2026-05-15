@@ -210,6 +210,7 @@ def release(board_type: str, config_filename: str = "config.json", *, filter_nam
 
     for build in builds:
         name = build["name"]
+        board_name = build.get("board_name", name)
         board_leaf = board_type.split("/")[-1]
 
         if board_leaf not in name:
@@ -248,8 +249,8 @@ def release(board_type: str, config_filename: str = "config.json", *, filter_nam
             f.write("# Append by release.py\n")
             for append in sdkconfig_append:
                 f.write(f"{append}\n")
-        # Build with macro BOARD_NAME defined to name
-        if os.system(f"idf.py -DBOARD_NAME={name} -DBOARD_TYPE={board_type} build") != 0:
+        # Build with macro BOARD_NAME defined to the external product name.
+        if os.system(f"idf.py -DBOARD_NAME={board_name} -DBOARD_TYPE={board_type} build") != 0:
             print("build failed")
             sys.exit(1)
 
