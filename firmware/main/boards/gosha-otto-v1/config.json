@@ -6,6 +6,11 @@
             "board_name": "GOSHA",
             "sdkconfig_append": [
                 "CONFIG_LANGUAGE_RU_RU=y",
+                "CONFIG_USE_CUSTOM_WAKE_WORD=y",
+                "CONFIG_CUSTOM_WAKE_WORD=\"gosha\"",
+                "CONFIG_CUSTOM_WAKE_WORD_DISPLAY=\"Гоша\"",
+                "CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=20",
+                "CONFIG_SR_MN_EN_MULTINET6_QUANT=y",
                 "CONFIG_HTTPD_WS_SUPPORT=y",
                 "CONFIG_CAMERA_OV2640=y",
                 "CONFIG_CAMERA_OV2640_AUTO_DETECT_DVP_INTERFACE_SENSOR=y",
