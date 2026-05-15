@@ -5,12 +5,13 @@
 ## Сначала прочитать
 
 1. `AGENTS.md`
-2. `docs/NEW_CHAT_CHECKPOINT_RU.md`
-3. `docs/AGENT_CHECKPOINT_RU.md`
-4. `docs/PROJECT_STATUS_RU.md`
-5. `docs/FIRMWARE_IMPORT_CHECKPOINT_RU.md`
-6. `docs/HARDWARE_MANIFEST_RU.md`
-7. `docs/PIN_MAP_RU.md`
+2. `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+3. `docs/NEW_CHAT_CHECKPOINT_RU.md`
+4. `docs/AGENT_CHECKPOINT_RU.md`
+5. `docs/PROJECT_STATUS_RU.md`
+6. `docs/FIRMWARE_IMPORT_CHECKPOINT_RU.md`
+7. `docs/HARDWARE_MANIFEST_RU.md`
+8. `docs/PIN_MAP_RU.md`
 
 ## Как писать новые записи
 
@@ -36,3 +37,5 @@
   - много профилей ИИ-агентов;
   - много OpenAI-совместимых провайдеров на стороне платформы;
   - без жёсткой привязки к одному облаку или одной модели.
+- Если нужно быстро понять, где серверный голос, панель и мобильный клиент, смотри:
+  - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`

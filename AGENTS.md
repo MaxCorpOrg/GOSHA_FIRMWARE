@@ -6,6 +6,7 @@
 
 1. Прочитай `START_HERE_FOR_NEW_CHAT.md`.
 2. Затем прочитай:
+   - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
    - `docs/NEW_CHAT_CHECKPOINT_RU.md`
    - `docs/AGENT_CHECKPOINT_RU.md`
    - `docs/PROJECT_STATUS_RU.md`
@@ -24,6 +25,8 @@
 ## Главные правила
 
 - `GOSHA_FIRMWARE` живёт отдельно от `GOSHA_PLATFORM` и отдельно от `AI_ROBOT`.
+- Если непонятно, где сервер, где мобильный клиент и где голоса, сначала смотри:
+  - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
 - `GOSHA_FIRMWARE` — часть масштабируемого проекта `Гоша`:
   - много роботов;
   - много профилей ИИ-агентов;
@@ -41,6 +44,7 @@
 - `docs/NEW_CHAT_CHECKPOINT_RU.md`, если изменилась короткая точка входа
 - `docs/HARDWARE_MANIFEST_RU.md`, если уточнилась аппаратная конфигурация
 - `docs/PIN_MAP_RU.md`, если подтверждены или изменены аппаратные выводы
+- локальный `AGENTS.md`, если изменилась зона ответственности конкретной подпапки
 
 ## Каноническая цель первой версии
 
