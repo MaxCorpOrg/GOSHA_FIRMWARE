@@ -2,7 +2,7 @@
     "target": "esp32s3",
     "builds": [
         {
-            "name": "gosha-otto-v1",
+            "name": "gosha-v1",
             "board_name": "GOSHA",
             "sdkconfig_append": [
                 "CONFIG_LANGUAGE_RU_RU=y",

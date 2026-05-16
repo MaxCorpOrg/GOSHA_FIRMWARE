@@ -26,7 +26,7 @@
 - Исходная база уже импортирована в:
   - `/home/max/GOSHA_FIRMWARE/firmware`
 - Первая целевая плата:
-  - `gosha-otto-v1`
+  - `gosha-v1`
   - на основе `otto-robot`
 - Рабочая локальная среда сборки уже поднята:
   - `/home/max/esp/esp-idf-v5.5.2`
