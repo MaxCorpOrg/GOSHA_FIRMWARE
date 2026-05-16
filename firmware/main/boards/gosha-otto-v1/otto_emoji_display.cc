@@ -32,7 +32,7 @@ void OttoEmojiDisplay::SetupPreviewImage() {
 }
 
 void OttoEmojiDisplay::InitializeOttoEmojis() {
-    ESP_LOGI(TAG, "Otto表情初始化将由Assets系统处理");
+    ESP_LOGI(TAG, "Инициализация эмоций Otto передана системе assets");
     // 表情初始化已移至assets系统,通过DEFAULT_EMOJI_COLLECTION=otto-gif配置
     // assets.cc会从assets分区加载GIF表情并设置到theme
 

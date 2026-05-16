@@ -62,7 +62,7 @@ private:
 
         CalculateBatteryLevel(average_adc);
 
-        // ESP_LOGI("PowerManager", "ADC值: %d 平均值: %ld 电量: %u%%", adc_value, average_adc,
+        // ESP_LOGI("PowerManager", "ADC: %d average: %ld battery: %u%%", adc_value, average_adc,
         //          battery_level_);
     }
 
@@ -91,9 +91,9 @@ public:
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
         gpio_config(&io_conf);
-        ESP_LOGI("PowerManager", "充电检测引脚配置完成: GPIO%d", charging_pin_);
+        ESP_LOGI("PowerManager", "Настроен вход контроля зарядки: GPIO%d", charging_pin_);
       } else {
-        ESP_LOGI("PowerManager", "充电检测引脚未配置，不进行充电状态检测");
+        ESP_LOGI("PowerManager", "Вход контроля зарядки не задан, состояние зарядки не отслеживается");
       }
 
         esp_timer_create_args_t timer_args = {
