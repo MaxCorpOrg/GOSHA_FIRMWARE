@@ -9,7 +9,7 @@
                 "CONFIG_USE_CUSTOM_WAKE_WORD=y",
                 "CONFIG_CUSTOM_WAKE_WORD=\"gosha\"",
                 "CONFIG_CUSTOM_WAKE_WORD_DISPLAY=\"Гоша\"",
-                "CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=45",
+                "CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=38",
                 "CONFIG_SR_MN_EN_MULTINET6_QUANT=y",
                 "CONFIG_HTTPD_WS_SUPPORT=y",
                 "CONFIG_CAMERA_OV2640=y",
