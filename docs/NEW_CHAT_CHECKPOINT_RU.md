@@ -16,6 +16,12 @@
 ## Последняя зафиксированная точка
 
 - Локальный репозиторий `GOSHA_FIRMWARE` уже создан.
+- У репозитория уже настроен `origin`:
+  - `git@github.com:MaxCorpOrg/GOSHA_FIRMWARE.git`
+- Ветка `main` уже отправлена в GitHub и отслеживает:
+  - `origin/main`
+- Публичный URL репозитория:
+  - `https://github.com/MaxCorpOrg/GOSHA_FIRMWARE`
 - Дерево исходников прошивки уже импортировано в:
   - `/home/max/GOSHA_FIRMWARE/firmware`
 - Канонический источник импорта уже зафиксирован:

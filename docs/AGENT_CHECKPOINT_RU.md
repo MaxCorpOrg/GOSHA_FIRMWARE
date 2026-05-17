@@ -13,6 +13,12 @@
 ## Текущая точка
 
 - Репозиторий уже создан как отдельный локальный контур.
+- Для репозитория уже настроен удалённый `origin`:
+  - `git@github.com:MaxCorpOrg/GOSHA_FIRMWARE.git`
+- Ветка `main` уже отправлена в GitHub и отслеживает:
+  - `origin/main`
+- Публичный адрес репозитория:
+  - `https://github.com/MaxCorpOrg/GOSHA_FIRMWARE`
 - Общая карта связанных контуров:
   - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
 - Каноническая исходная база для первого импорта:
