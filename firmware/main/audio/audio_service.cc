@@ -37,6 +37,55 @@
 
 #define TAG "AudioService"
 
+namespace {
+
+int GetOpusPacketDurationMs(const uint8_t* packet, size_t packet_size, int sample_rate) {
+    if (packet == nullptr || packet_size == 0 || sample_rate <= 0) {
+        return OPUS_FRAME_DURATION_MS;
+    }
+
+    const uint8_t toc = packet[0];
+    int samples_per_frame = 0;
+    if (toc & 0x80) {
+        samples_per_frame = (sample_rate << ((toc >> 3) & 0x3)) / 400;
+    } else if ((toc & 0x60) == 0x60) {
+        samples_per_frame = (toc & 0x08) ? sample_rate / 50 : sample_rate / 100;
+    } else {
+        samples_per_frame = (sample_rate << ((toc >> 3) & 0x3)) / 100;
+    }
+
+    int frame_count = 0;
+    switch (toc & 0x3) {
+        case 0:
+            frame_count = 1;
+            break;
+        case 1:
+        case 2:
+            frame_count = 2;
+            break;
+        default:
+            if (packet_size < 2) {
+                return OPUS_FRAME_DURATION_MS;
+            }
+            frame_count = packet[1] & 0x3F;
+            break;
+    }
+
+    if (frame_count <= 0 || samples_per_frame <= 0) {
+        return OPUS_FRAME_DURATION_MS;
+    }
+
+    int duration_ms = (samples_per_frame * frame_count * 1000) / sample_rate;
+    if (AS_OPUS_GET_FRAME_DRU_ENUM(duration_ms) == -1) {
+        ESP_LOGW(TAG, "Unsupported local Opus packet duration %d ms, fallback to %d ms",
+                 duration_ms, OPUS_FRAME_DURATION_MS);
+        return OPUS_FRAME_DURATION_MS;
+    }
+    return duration_ms;
+}
+
+}  // namespace
+
 AudioService::AudioService() {
     event_group_ = xEventGroupCreate();
 }
@@ -716,7 +765,7 @@ void AudioService::PlaySound(const std::string_view& ogg) {
             // Audio packet (Opus)
             auto packet = std::make_unique<AudioStreamPacket>();
             packet->sample_rate = sample_rate;
-            packet->frame_duration = 60;
+            packet->frame_duration = GetOpusPacketDurationMs(pkt_ptr, pkt_len, sample_rate);
             packet->payload.resize(pkt_len);
             std::memcpy(packet->payload.data(), pkt_ptr, pkt_len);
             PushPacketToDecodeQueue(std::move(packet), true);
