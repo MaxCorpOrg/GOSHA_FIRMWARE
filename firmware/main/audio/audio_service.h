@@ -93,6 +93,12 @@ struct AudioTask {
     AudioTaskType type;
     std::vector<int16_t> pcm;
     uint32_t timestamp;
+    uint32_t diagnostic_run = 0;
+    int diagnostic_state = -1;
+    uint32_t diagnostic_decode_queue_size = 0;
+    int source_sample_rate = 0;
+    int source_frame_duration = 0;
+    bool resampled = false;
 };
 
 struct DebugStatistics {
@@ -129,7 +135,7 @@ public:
 
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
-    void PlaySound(const std::string_view& sound);
+    void PlaySound(const std::string_view& sound, uint32_t diagnostic_run = 0, int diagnostic_state = -1);
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);

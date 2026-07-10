@@ -11,6 +11,8 @@ struct AudioStreamPacket {
     int sample_rate = 0;
     int frame_duration = 0;
     uint32_t timestamp = 0;
+    uint32_t diagnostic_run = 0;
+    int diagnostic_state = -1;
     std::vector<uint8_t> payload;
 };
 
@@ -95,4 +97,3 @@ protected:
 };
 
 #endif // PROTOCOL_H
-

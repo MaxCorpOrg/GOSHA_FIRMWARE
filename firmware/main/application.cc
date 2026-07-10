@@ -637,14 +637,29 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
     }
 }
 
-void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound) {
+void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound,
+                        uint32_t diagnostic_run) {
     ESP_LOGW(TAG, "Alert [%s] %s: %s", emotion, status, message);
+    auto state = GetDeviceState();
+    if (diagnostic_run != 0) {
+        auto codec = Board::GetInstance().GetAudioCodec();
+        ESP_LOGI(TAG,
+                 "wifi_prompt_diag alert run=%lu device_state=%s output_volume=%d output_enabled=%d "
+                 "input_sample_rate=%d output_sample_rate=%d sound_bytes=%u",
+                 static_cast<unsigned long>(diagnostic_run),
+                 DeviceStateMachine::GetStateName(state),
+                 codec ? codec->output_volume() : -1,
+                 codec ? codec->output_enabled() : false,
+                 codec ? codec->input_sample_rate() : 0,
+                 codec ? codec->output_sample_rate() : 0,
+                 static_cast<unsigned>(sound.size()));
+    }
     auto display = Board::GetInstance().GetDisplay();
     display->SetStatus(status);
     display->SetEmotion(emotion);
     display->SetChatMessage("system", message);
     if (!sound.empty()) {
-        audio_service_.PlaySound(sound);
+        audio_service_.PlaySound(sound, diagnostic_run, static_cast<int>(state));
     }
 }
 
@@ -1114,4 +1129,3 @@ void Application::ResetProtocol() {
         protocol_.reset();
     });
 }
-

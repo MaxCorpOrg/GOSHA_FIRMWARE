@@ -2,6 +2,8 @@
 
 #include "display.h"
 #include "application.h"
+#include "audio_codec.h"
+#include "device_state_machine.h"
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
@@ -159,22 +161,38 @@ void WifiBoard::OnWifiConnectTimeout(void* arg) {
 }
 
 void WifiBoard::StartWifiConfigMode() {
+    static uint32_t wifi_config_prompt_run = 0;
+    const uint32_t prompt_run = ++wifi_config_prompt_run;
+    auto& app = Application::GetInstance();
+    auto state_before = app.GetDeviceState();
+    auto codec = Board::GetInstance().GetAudioCodec();
+    ESP_LOGI(TAG,
+             "wifi_prompt_diag start_wifi_config run=%lu device_state=%s output_volume=%d output_enabled=%d "
+             "input_sample_rate=%d output_sample_rate=%d",
+             static_cast<unsigned long>(prompt_run),
+             DeviceStateMachine::GetStateName(state_before),
+             codec ? codec->output_volume() : -1,
+             codec ? codec->output_enabled() : false,
+             codec ? codec->input_sample_rate() : 0,
+             codec ? codec->output_sample_rate() : 0);
+
     in_config_mode_ = true;
     // Transition to wifi configuring state
-    Application::GetInstance().SetDeviceState(kDeviceStateWifiConfiguring);
+    app.SetDeviceState(kDeviceStateWifiConfiguring);
 #ifdef CONFIG_USE_HOTSPOT_WIFI_PROVISIONING
     auto& wifi_manager = WifiManager::GetInstance();
 
     wifi_manager.StartConfigAp();
 
     // Show config prompt after a short delay
-    Application::GetInstance().Schedule([&wifi_manager]() {
+    Application::GetInstance().Schedule([&wifi_manager, prompt_run]() {
         std::string hint = Lang::Strings::CONNECT_TO_HOTSPOT;
         hint += wifi_manager.GetApSsid();
         hint += Lang::Strings::ACCESS_VIA_BROWSER;
         hint += wifi_manager.GetApWebUrl();
 
-        Application::GetInstance().Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "gear", Lang::Sounds::OGG_WIFICONFIG);
+        Application::GetInstance().Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "gear",
+                                         Lang::Sounds::OGG_WIFICONFIG, prompt_run);
     });
 #elif CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
     auto &blufi = Blufi::GetInstance();

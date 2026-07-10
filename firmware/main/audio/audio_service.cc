@@ -39,6 +39,32 @@
 
 namespace {
 
+struct DiagnosticLogLimiter {
+    uint32_t run = 0;
+    uint32_t count = 0;
+    int64_t last_log_time_us = 0;
+};
+
+bool ShouldLogDiagnosticFrame(DiagnosticLogLimiter& limiter, uint32_t run, uint32_t initial_count,
+                              int64_t interval_us) {
+    if (run == 0) {
+        return false;
+    }
+    if (limiter.run != run) {
+        limiter.run = run;
+        limiter.count = 0;
+        limiter.last_log_time_us = 0;
+    }
+
+    limiter.count++;
+    const int64_t now = esp_timer_get_time();
+    if (limiter.count <= initial_count || now - limiter.last_log_time_us >= interval_us) {
+        limiter.last_log_time_us = now;
+        return true;
+    }
+    return false;
+}
+
 int GetOpusPacketDurationMs(const uint8_t* packet, size_t packet_size, int sample_rate) {
     if (packet == nullptr || packet_size == 0 || sample_rate <= 0) {
         return OPUS_FRAME_DURATION_MS;
@@ -337,6 +363,8 @@ void AudioService::AudioInputTask() {
 }
 
 void AudioService::AudioOutputTask() {
+    static DiagnosticLogLimiter output_log_limiter;
+
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
         audio_queue_cv_.wait(lock, [this]() { return !audio_playback_queue_.empty() || service_stopped_; });
@@ -346,6 +374,7 @@ void AudioService::AudioOutputTask() {
 
         auto task = std::move(audio_playback_queue_.front());
         audio_playback_queue_.pop_front();
+        const uint32_t playback_queue_size = static_cast<uint32_t>(audio_playback_queue_.size());
         audio_queue_cv_.notify_all();
         lock.unlock();
 
@@ -354,7 +383,27 @@ void AudioService::AudioOutputTask() {
             esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
             codec_->EnableOutput(true);
         }
+        codec_->SetOutputDiagnosticContext(task->diagnostic_run, task->diagnostic_state, playback_queue_size,
+                                           task->source_sample_rate, task->source_frame_duration, task->resampled);
+        if (ShouldLogDiagnosticFrame(output_log_limiter, task->diagnostic_run, 4, 1000000)) {
+            ESP_LOGI(TAG,
+                     "wifi_prompt_diag output_to_codec run=%lu device_state=%d output_volume=%d output_enabled=%d "
+                     "source_sample_rate=%d output_sample_rate=%d frame_duration=%d resampled=%d "
+                     "decode_queue_after_pop=%lu playback_queue_remaining=%lu pcm_samples=%u",
+                     static_cast<unsigned long>(task->diagnostic_run),
+                     task->diagnostic_state,
+                     codec_->output_volume(),
+                     codec_->output_enabled(),
+                     task->source_sample_rate,
+                     codec_->output_sample_rate(),
+                     task->source_frame_duration,
+                     task->resampled,
+                     static_cast<unsigned long>(task->diagnostic_decode_queue_size),
+                     static_cast<unsigned long>(playback_queue_size),
+                     static_cast<unsigned>(task->pcm.size()));
+        }
         codec_->OutputData(task->pcm);
+        codec_->SetOutputDiagnosticContext(0, -1, 0, 0, 0, false);
 
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
@@ -373,6 +422,8 @@ void AudioService::AudioOutputTask() {
 }
 
 void AudioService::OpusCodecTask() {
+    static DiagnosticLogLimiter decode_log_limiter;
+
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
         audio_queue_cv_.wait(lock, [this]() {
@@ -388,12 +439,18 @@ void AudioService::OpusCodecTask() {
         if (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE) {
             auto packet = std::move(audio_decode_queue_.front());
             audio_decode_queue_.pop_front();
+            const uint32_t decode_queue_size = static_cast<uint32_t>(audio_decode_queue_.size());
             audio_queue_cv_.notify_all();
             lock.unlock();
 
             auto task = std::make_unique<AudioTask>();
             task->type = kAudioTaskTypeDecodeToPlaybackQueue;
             task->timestamp = packet->timestamp;
+            task->diagnostic_run = packet->diagnostic_run;
+            task->diagnostic_state = packet->diagnostic_state;
+            task->diagnostic_decode_queue_size = decode_queue_size;
+            task->source_sample_rate = packet->sample_rate;
+            task->source_frame_duration = packet->frame_duration;
 
             SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
             if (opus_decoder_ != nullptr) {
@@ -416,6 +473,7 @@ void AudioService::OpusCodecTask() {
                 if (ret == ESP_AUDIO_ERR_OK) {
                     task->pcm.resize(out_frame.decoded_size / sizeof(int16_t));
                     if (decoder_sample_rate_ != codec_->output_sample_rate() && output_resampler_ != nullptr) {
+                        task->resampled = true;
                         uint32_t target_size = 0;
                         esp_ae_rate_cvt_get_max_out_sample_num(output_resampler_, task->pcm.size(), &target_size);
                         std::vector<int16_t> resampled(target_size);
@@ -426,6 +484,22 @@ void AudioService::OpusCodecTask() {
                         task->pcm = std::move(resampled);
                     }
                     lock.lock();
+                    const uint32_t playback_queue_before_push = static_cast<uint32_t>(audio_playback_queue_.size());
+                    if (ShouldLogDiagnosticFrame(decode_log_limiter, task->diagnostic_run, 4, 1000000)) {
+                        ESP_LOGI(TAG,
+                                 "wifi_prompt_diag decode run=%lu device_state=%d source_sample_rate=%d "
+                                 "output_sample_rate=%d frame_duration=%d resampled=%d "
+                                 "decode_queue_after_pop=%lu playback_queue_before_push=%lu pcm_samples=%u",
+                                 static_cast<unsigned long>(task->diagnostic_run),
+                                 task->diagnostic_state,
+                                 task->source_sample_rate,
+                                 codec_->output_sample_rate(),
+                                 task->source_frame_duration,
+                                 task->resampled,
+                                 static_cast<unsigned long>(task->diagnostic_decode_queue_size),
+                                 static_cast<unsigned long>(playback_queue_before_push),
+                                 static_cast<unsigned>(task->pcm.size()));
+                    }
                     audio_playback_queue_.push_back(std::move(task));
                     audio_queue_cv_.notify_all();
                     debug_statistics_.decode_count++;
@@ -678,7 +752,29 @@ void AudioService::SetCallbacks(AudioServiceCallbacks& callbacks) {
     callbacks_ = callbacks;
 }
 
-void AudioService::PlaySound(const std::string_view& ogg) {
+void AudioService::PlaySound(const std::string_view& ogg, uint32_t diagnostic_run, int diagnostic_state) {
+    size_t decode_queue_size = 0;
+    size_t playback_queue_size = 0;
+    {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        decode_queue_size = audio_decode_queue_.size();
+        playback_queue_size = audio_playback_queue_.size();
+    }
+    if (diagnostic_run != 0) {
+        ESP_LOGI(TAG,
+                 "wifi_prompt_diag play_sound run=%lu device_state=%d output_volume=%d output_enabled=%d "
+                 "input_sample_rate=%d output_sample_rate=%d decode_queue=%u playback_queue=%u ogg_bytes=%u",
+                 static_cast<unsigned long>(diagnostic_run),
+                 diagnostic_state,
+                 codec_->output_volume(),
+                 codec_->output_enabled(),
+                 codec_->input_sample_rate(),
+                 codec_->output_sample_rate(),
+                 static_cast<unsigned>(decode_queue_size),
+                 static_cast<unsigned>(playback_queue_size),
+                 static_cast<unsigned>(ogg.size()));
+    }
+
     if (!codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
@@ -699,6 +795,8 @@ void AudioService::PlaySound(const std::string_view& ogg) {
     bool seen_head = false;
     bool seen_tags = false;
     int sample_rate = 16000; // 默认值
+    uint32_t audio_packet_count = 0;
+    static DiagnosticLogLimiter packet_log_limiter;
 
     while (true) {
         size_t pos = find_page(offset);
@@ -766,12 +864,40 @@ void AudioService::PlaySound(const std::string_view& ogg) {
             auto packet = std::make_unique<AudioStreamPacket>();
             packet->sample_rate = sample_rate;
             packet->frame_duration = GetOpusPacketDurationMs(pkt_ptr, pkt_len, sample_rate);
+            packet->diagnostic_run = diagnostic_run;
+            packet->diagnostic_state = diagnostic_state;
             packet->payload.resize(pkt_len);
             std::memcpy(packet->payload.data(), pkt_ptr, pkt_len);
+            audio_packet_count++;
+            if (ShouldLogDiagnosticFrame(packet_log_limiter, diagnostic_run, 4, 1000000)) {
+                std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+                ESP_LOGI(TAG,
+                         "wifi_prompt_diag opus_packet run=%lu packet=%lu device_state=%d sample_rate=%d "
+                         "frame_duration=%d will_resample=%d decode_queue=%u playback_queue=%u payload_bytes=%u",
+                         static_cast<unsigned long>(diagnostic_run),
+                         static_cast<unsigned long>(audio_packet_count),
+                         diagnostic_state,
+                         packet->sample_rate,
+                         packet->frame_duration,
+                         packet->sample_rate != codec_->output_sample_rate(),
+                         static_cast<unsigned>(audio_decode_queue_.size()),
+                         static_cast<unsigned>(audio_playback_queue_.size()),
+                         static_cast<unsigned>(packet->payload.size()));
+            }
             PushPacketToDecodeQueue(std::move(packet), true);
         }
 
         offset = body_off + body_size;
+    }
+
+    if (diagnostic_run != 0) {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        ESP_LOGI(TAG,
+                 "wifi_prompt_diag play_sound_done run=%lu queued_packets=%lu decode_queue=%u playback_queue=%u",
+                 static_cast<unsigned long>(diagnostic_run),
+                 static_cast<unsigned long>(audio_packet_count),
+                 static_cast<unsigned>(audio_decode_queue_.size()),
+                 static_cast<unsigned>(audio_playback_queue_.size()));
     }
 }
 
