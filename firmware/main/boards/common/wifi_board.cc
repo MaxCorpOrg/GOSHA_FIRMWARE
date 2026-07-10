@@ -165,16 +165,16 @@ void WifiBoard::StartWifiConfigMode() {
     const uint32_t prompt_run = ++wifi_config_prompt_run;
     auto& app = Application::GetInstance();
     auto state_before = app.GetDeviceState();
-    auto codec = Board::GetInstance().GetAudioCodec();
+    auto audio_codec = Board::GetInstance().GetAudioCodec();
     ESP_LOGI(TAG,
              "wifi_prompt_diag start_wifi_config run=%lu device_state=%s output_volume=%d output_enabled=%d "
              "input_sample_rate=%d output_sample_rate=%d",
              static_cast<unsigned long>(prompt_run),
              DeviceStateMachine::GetStateName(state_before),
-             codec ? codec->output_volume() : -1,
-             codec ? codec->output_enabled() : false,
-             codec ? codec->input_sample_rate() : 0,
-             codec ? codec->output_sample_rate() : 0);
+             audio_codec ? audio_codec->output_volume() : -1,
+             audio_codec ? audio_codec->output_enabled() : false,
+             audio_codec ? audio_codec->input_sample_rate() : 0,
+             audio_codec ? audio_codec->output_sample_rate() : 0);
 
     in_config_mode_ = true;
     // Transition to wifi configuring state
