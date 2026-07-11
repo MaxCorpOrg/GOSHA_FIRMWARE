@@ -90,13 +90,18 @@
   - локальные `Opus`-пакеты в `assets/locales/ru-RU` идут по `80 ms`, а `AudioService` ошибочно помечал их как `60 ms`;
   - в `firmware/main/audio/audio_service.cc` уже добавлен расчёт реальной длительности пакета;
   - новый `gosha.bin` уже собран и прошит на тестовое устройство через `/dev/ttyACM0`
-- Последняя прошивочная правка без прошивки устройства:
+- Последняя прошивочная правка уже прошита и подтверждена на `gosha-main`:
   - для локального `WSControl` профиля `gosha-v1` JSON-RPC ответы `MCP` теперь отправляются только в исходную пару `файловый дескриптор + поколение WebSocket-сессии`;
   - каждое новое подключение через `AddClient` получает монотонное поколение, поэтому старый отложенный ответ после повторного подключения с тем же файловым дескриптором отбрасывается с записью в журнал;
   - `McpServer` получил перегрузки `ParseMessage` с передаваемым отправителем ответа, старый облачный путь по умолчанию сохранён;
   - в `gosha-v1` больше не хранится `httpd_req_t*`, отправка идёт через `httpd_queue_work` и `httpd_ws_send_frame_async`;
   - добавлен host-check `firmware/scripts/check_wscontrol_mcp_reply_path.py`;
-  - каноническая сборка `python3 scripts/release.py gosha-v1 --name gosha-v1` прошла успешно, `merged-binary.bin` создан.
+  - каноническая сборка `python3 scripts/release.py gosha-v1 --name gosha-v1` прошла успешно, `merged-binary.bin` создан;
+  - `gosha.bin` SHA-256 `1fff680a169a9e7958ba914c0e4fb953dee494f8aea3d92600159add1a453ad4`;
+  - образ прошит через `/dev/ttyACM1` без очистки NVS;
+  - робот загрузился без brownout, вернулся на `192.168.1.159`, активный раздел `ota_0`;
+  - локальные `initialize`, `tools/list` и `self.get_system_info` ответили в исходный WebSocket, `ota.label = ota_0`;
+  - три последовательных reconnect-прогона не доставили старый ответ новому клиенту.
 - Общая карта связанных контуров теперь зафиксирована здесь:
   - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
 

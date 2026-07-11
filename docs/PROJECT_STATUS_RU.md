@@ -163,7 +163,12 @@
   - `httpd_req_t*` больше не хранится в состоянии локального сервера `gosha-v1`, широкая рассылка ответов не используется;
   - добавлен host-check `firmware/scripts/check_wscontrol_mcp_reply_path.py` для статической проверки этого контракта;
   - каноническая сборка `python3 scripts/release.py gosha-v1 --name gosha-v1` прошла успешно, `merged-binary.bin` создан;
-  - прошивка устройства в этой задаче не выполнялась.
+  - после двух read-only review и исправления риска повторного `fd` образ прошит на `gosha-main` через `/dev/ttyACM1` без очистки NVS;
+  - SHA-256 прошитого `gosha.bin`: `1fff680a169a9e7958ba914c0e4fb953dee494f8aea3d92600159add1a453ad4`;
+  - загрузочный UART подтвердил сборку `Jul 11 2026 17:30:56`, ELF SHA-префикс `cf799e35b`, домашний адрес `192.168.1.159`, активный `ota_0` и переход в `idle` без brownout;
+  - штатный локальный WebSocket-клиент успешно получил ответы `initialize`, `tools/list` с пользовательскими инструментами и `tools/call self.get_system_info`; ответ содержит `ota.label = ota_0`;
+  - три последовательных теста «старый запрос -> резкое закрытие -> новое соединение» не доставили старый request-id новому клиенту;
+  - журналы: `20260711-live-flash.log`, SHA-256 `898b9be92a5fc6e10c5db3624def32b335d4446cd5560f6b5e180da4a653c01d`, и `20260711-postflash-boot-uart.log`, SHA-256 `ec73dfc8dc579927284781f21902454495ff1c96f98ea054b0a1f6a126a94290`, в папке задачи `task-20260711T130051Z-issue-4-wscontrol-mcpserver`.
 
 ## На чем остановились
 

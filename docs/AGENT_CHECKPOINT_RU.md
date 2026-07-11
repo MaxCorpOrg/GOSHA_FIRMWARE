@@ -133,7 +133,14 @@
 - Каноническая сборка после правки прошла успешно:
   - `python3 scripts/release.py gosha-v1 --name gosha-v1`
   - `firmware/build/merged-binary.bin` создан
-  - прошивка устройства не выполнялась.
+  - `gosha.bin` SHA-256 `1fff680a169a9e7958ba914c0e4fb953dee494f8aea3d92600159add1a453ad4`.
+- После финального review новый образ прошит на `gosha-main` через `/dev/ttyACM1` без очистки NVS.
+- Живой результат:
+  - загрузка без brownout, домашний адрес `192.168.1.159`, активный `ota_0`;
+  - локальные `initialize`, `tools/list` и `self.get_system_info` получили адресные JSON-RPC ответы;
+  - `self.get_system_info` вернул `ota.label = ota_0`;
+  - три reconnect-прогона не передали старый ответ новому соединению с переиспользованным файловым дескриптором.
+- Журналы живой проверки лежат в `/home/max/AI_OFFICE/local_only/ai-office/logs/task-20260711T130051Z-issue-4-wscontrol-mcpserver/`.
 - Зафиксированы предварительные аппаратные документы:
   - `HARDWARE_MANIFEST_RU.md`
   - `PIN_MAP_RU.md`
