@@ -5,6 +5,7 @@
 #include <sys/param.h>
 #include <cstring>
 #include <cstdlib>
+#include <inttypes.h>
 #include <memory>
 #include <new>
 
@@ -12,6 +13,7 @@ namespace {
 struct AsyncWebSocketSendContext {
     httpd_handle_t server_handle = nullptr;
     int sock_fd = -1;
+    uint64_t session_generation = 0;
     std::string payload;
 };
 }  // namespace
@@ -128,7 +130,7 @@ void WebSocketControlServer::Stop() {
     if (server_handle_) {
         httpd_stop(server_handle_);
         server_handle_ = nullptr;
-        client_fds_.clear();
+        client_generations_.clear();
         ESP_LOGI(TAG, "WebSocket server stopped");
     }
 }
@@ -160,8 +162,15 @@ void WebSocketControlServer::HandleMessage(int sock_fd, const char* data, size_t
         return;
     }
 
-    auto reply_sender = [this, sock_fd](const std::string& payload) {
-        SendToClient(sock_fd, payload);
+    uint64_t session_generation = 0;
+    if (!GetClientGeneration(sock_fd, &session_generation)) {
+        ESP_LOGW(TAG, "Skip MCP request from inactive WebSocket fd %d", sock_fd);
+        cJSON_Delete(root);
+        return;
+    }
+
+    auto reply_sender = [this, sock_fd, session_generation](const std::string& payload) {
+        SendToClient(sock_fd, session_generation, payload);
     };
     
     bool handled_payload = false;
@@ -185,7 +194,7 @@ void WebSocketControlServer::HandleMessage(int sock_fd, const char* data, size_t
     cJSON_Delete(root);
 }
 
-void WebSocketControlServer::SendToClient(int sock_fd, const std::string& payload) {
+void WebSocketControlServer::SendToClient(int sock_fd, uint64_t session_generation, const std::string& payload) {
     if (server_handle_ == nullptr) {
         ESP_LOGW(TAG, "Cannot send WebSocket reply: server is not running");
         return;
@@ -203,11 +212,13 @@ void WebSocketControlServer::SendToClient(int sock_fd, const std::string& payloa
 
     context->server_handle = server_handle_;
     context->sock_fd = sock_fd;
+    context->session_generation = session_generation;
     context->payload = payload;
 
     esp_err_t ret = httpd_queue_work(server_handle_, SendAsyncWork, context);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to queue WebSocket reply for fd %d: %d", sock_fd, ret);
+        ESP_LOGE(TAG, "Failed to queue WebSocket reply for fd %d generation %" PRIu64 ": %d",
+                 sock_fd, session_generation, ret);
         delete context;
     }
 }
@@ -219,8 +230,22 @@ void WebSocketControlServer::SendAsyncWork(void* arg) {
         return;
     }
 
+    auto* server = WebSocketControlServer::instance_;
+    if (server == nullptr || server->server_handle_ != context->server_handle) {
+        ESP_LOGW(TAG, "Skip WebSocket reply: server session is no longer active");
+        return;
+    }
+
+    if (!server->IsClientGenerationActive(context->sock_fd, context->session_generation)) {
+        ESP_LOGW(TAG, "Skip stale WebSocket reply: fd %d generation %" PRIu64 " is no longer active",
+                 context->sock_fd, context->session_generation);
+        return;
+    }
+
     if (httpd_ws_get_fd_info(context->server_handle, context->sock_fd) != HTTPD_WS_CLIENT_WEBSOCKET) {
-        ESP_LOGW(TAG, "Skip WebSocket reply: fd %d is not an active WebSocket client", context->sock_fd);
+        ESP_LOGW(TAG, "Skip WebSocket reply: fd %d generation %" PRIu64
+                 " is not an active WebSocket client",
+                 context->sock_fd, context->session_generation);
         return;
     }
 
@@ -232,21 +257,59 @@ void WebSocketControlServer::SendAsyncWork(void* arg) {
 
     esp_err_t ret = httpd_ws_send_frame_async(context->server_handle, context->sock_fd, &frame);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "httpd_ws_send_frame_async failed for fd %d: %d", context->sock_fd, ret);
+        ESP_LOGE(TAG, "httpd_ws_send_frame_async failed for fd %d generation %" PRIu64 ": %d",
+                 context->sock_fd, context->session_generation, ret);
     }
 }
 
 void WebSocketControlServer::AddClient(int sock_fd) {
-    if (client_fds_.insert(sock_fd).second) {
-        ESP_LOGI(TAG, "Client connected: %d (total: %zu)", sock_fd, client_fds_.size());
-    }
+    uint64_t generation = NextClientGeneration();
+    bool replaced = client_generations_.find(sock_fd) != client_generations_.end();
+    client_generations_[sock_fd] = generation;
+
+    ESP_LOGI(TAG, "Client %s: %d generation %" PRIu64 " (total: %zu)",
+             replaced ? "reconnected" : "connected", sock_fd, generation, client_generations_.size());
 }
 
 void WebSocketControlServer::RemoveClient(int sock_fd) {
-    client_fds_.erase(sock_fd);
-    ESP_LOGI(TAG, "Client disconnected: %d (total: %zu)", sock_fd, client_fds_.size());
+    auto it = client_generations_.find(sock_fd);
+    if (it != client_generations_.end()) {
+        ESP_LOGI(TAG, "Client disconnected: %d generation %" PRIu64 " (total: %zu)",
+                 sock_fd, it->second, client_generations_.size() - 1);
+        client_generations_.erase(it);
+    } else {
+        ESP_LOGI(TAG, "Client disconnected: %d (already inactive, total: %zu)",
+                 sock_fd, client_generations_.size());
+    }
 }
 
 size_t WebSocketControlServer::GetClientCount() const {
-    return client_fds_.size();
+    return client_generations_.size();
+}
+
+uint64_t WebSocketControlServer::NextClientGeneration() {
+    ++next_client_generation_;
+    if (next_client_generation_ == 0) {
+        ++next_client_generation_;
+    }
+    return next_client_generation_;
+}
+
+bool WebSocketControlServer::GetClientGeneration(int sock_fd, uint64_t* generation) const {
+    if (generation == nullptr) {
+        return false;
+    }
+
+    auto it = client_generations_.find(sock_fd);
+    if (it == client_generations_.end()) {
+        return false;
+    }
+
+    *generation = it->second;
+    return true;
+}
+
+bool WebSocketControlServer::IsClientGenerationActive(int sock_fd, uint64_t generation) const {
+    auto it = client_generations_.find(sock_fd);
+    return it != client_generations_.end() && it->second == generation;
 }

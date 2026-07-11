@@ -68,10 +68,27 @@ def main() -> int:
         is not None,
     )
     ok &= require(
-        "gosha-v1 stores socket fds instead of request pointers",
-        "std::set<int> client_fds_;" in ws_h
+        "gosha-v1 stores WebSocket session generations by socket fd",
+        "std::map<int, uint64_t> client_generations_;" in ws_h
+        and "uint64_t next_client_generation_ = 0;" in ws_h
         and "std::map<int, httpd_req_t" not in ws_h
         and "clients_" not in ws_h,
+    )
+    ok &= require(
+        "gosha-v1 assigns a new monotonic generation on every AddClient",
+        "uint64_t WebSocketControlServer::NextClientGeneration()" in ws_cc
+        and "uint64_t generation = NextClientGeneration();" in ws_cc
+        and "client_generations_[sock_fd] = generation;" in ws_cc,
+    )
+    ok &= require(
+        "gosha-v1 captures fd and generation for delayed MCP replies",
+        "[this, sock_fd, session_generation]" in ws_cc
+        and "SendToClient(sock_fd, session_generation, payload)" in ws_cc,
+    )
+    ok &= require(
+        "gosha-v1 queues WebSocket replies with captured generation",
+        "uint64_t session_generation = 0;" in ws_cc
+        and "context->session_generation = session_generation;" in ws_cc,
     )
     ok &= require(
         "gosha-v1 queues WebSocket replies on httpd",
@@ -80,6 +97,11 @@ def main() -> int:
     ok &= require(
         "gosha-v1 sends async WebSocket frame to the original fd",
         "httpd_ws_send_frame_async(context->server_handle, context->sock_fd, &frame)" in ws_cc,
+    )
+    ok &= require(
+        "gosha-v1 validates active WebSocket generation before async send",
+        "IsClientGenerationActive(context->sock_fd, context->session_generation)" in ws_cc
+        and "Skip stale WebSocket reply" in ws_cc,
     )
     ok &= require(
         "gosha-v1 validates active WebSocket fd before sending",
