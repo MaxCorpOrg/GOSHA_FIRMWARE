@@ -13,6 +13,8 @@
 
 #include <cJSON.h>
 
+using McpReplySender = std::function<void(const std::string& payload)>;
+
 class ImageContent {
 private:
     std::string encoded_data_;
@@ -324,7 +326,9 @@ public:
     void AddTool(const std::string& name, const std::string& description, const PropertyList& properties, std::function<ReturnValue(const PropertyList&)> callback);
     void AddUserOnlyTool(const std::string& name, const std::string& description, const PropertyList& properties, std::function<ReturnValue(const PropertyList&)> callback);
     void ParseMessage(const cJSON* json);
+    void ParseMessage(const cJSON* json, McpReplySender reply_sender);
     void ParseMessage(const std::string& message);
+    void ParseMessage(const std::string& message, McpReplySender reply_sender);
 
 private:
     McpServer();
@@ -332,11 +336,11 @@ private:
 
     void ParseCapabilities(const cJSON* capabilities);
 
-    void ReplyResult(int id, const std::string& result);
-    void ReplyError(int id, const std::string& message);
+    void ReplyResult(int id, const std::string& result, McpReplySender reply_sender);
+    void ReplyError(int id, const std::string& message, McpReplySender reply_sender);
 
-    void GetToolsList(int id, const std::string& cursor, bool list_user_only_tools);
-    void DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments);
+    void GetToolsList(int id, const std::string& cursor, bool list_user_only_tools, McpReplySender reply_sender);
+    void DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments, McpReplySender reply_sender);
 
     std::vector<McpTool*> tools_;
 };
