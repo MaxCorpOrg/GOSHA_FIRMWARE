@@ -27,6 +27,9 @@ public:
     virtual void OutputData(std::vector<int16_t>& data);
     virtual bool InputData(std::vector<int16_t>& data);
     virtual void Start();
+    void SetOutputDiagnosticContext(uint32_t run, int device_state, uint32_t queue_size,
+                                    int source_sample_rate, int source_frame_duration,
+                                    bool resampled);
 
     inline bool duplex() const { return duplex_; }
     inline bool input_reference() const { return input_reference_; }
@@ -53,6 +56,12 @@ protected:
     int output_channels_ = 1;
     int output_volume_ = 70;
     float input_gain_ = 0.0;
+    uint32_t output_diagnostic_run_ = 0;
+    int output_diagnostic_state_ = -1;
+    uint32_t output_diagnostic_queue_size_ = 0;
+    int output_diagnostic_source_sample_rate_ = 0;
+    int output_diagnostic_source_frame_duration_ = 0;
+    bool output_diagnostic_resampled_ = false;
 
     virtual int Read(int16_t* dest, int samples) = 0;
     virtual int Write(const int16_t* data, int samples) = 0;

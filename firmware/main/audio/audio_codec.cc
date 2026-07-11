@@ -47,6 +47,17 @@ void AudioCodec::Start() {
     ESP_LOGI(TAG, "Audio codec started");
 }
 
+void AudioCodec::SetOutputDiagnosticContext(uint32_t run, int device_state, uint32_t queue_size,
+                                            int source_sample_rate, int source_frame_duration,
+                                            bool resampled) {
+    output_diagnostic_run_ = run;
+    output_diagnostic_state_ = device_state;
+    output_diagnostic_queue_size_ = queue_size;
+    output_diagnostic_source_sample_rate_ = source_sample_rate;
+    output_diagnostic_source_frame_duration_ = source_frame_duration;
+    output_diagnostic_resampled_ = resampled;
+}
+
 void AudioCodec::SetOutputVolume(int volume) {
     output_volume_ = volume;
     ESP_LOGI(TAG, "Set output volume to %d", output_volume_);

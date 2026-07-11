@@ -80,7 +80,8 @@ public:
     /**
      * Alert with status, message, emotion and optional sound
      */
-    void Alert(const char* status, const char* message, const char* emotion = "", const std::string_view& sound = "");
+    void Alert(const char* status, const char* message, const char* emotion = "",
+               const std::string_view& sound = "", uint32_t diagnostic_run = 0);
     void DismissAlert();
 
     void AbortSpeaking(AbortReason reason);

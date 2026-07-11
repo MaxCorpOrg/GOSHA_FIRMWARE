@@ -1,10 +1,41 @@
 #include "no_audio_codec.h"
 
 #include <esp_log.h>
+#include <esp_timer.h>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
 #define TAG "NoAudioCodec"
+
+namespace {
+
+struct OutputDiagnosticLogLimiter {
+    uint32_t run = 0;
+    uint32_t count = 0;
+    int64_t last_log_time_us = 0;
+};
+
+bool ShouldLogOutputDiagnostic(OutputDiagnosticLogLimiter& limiter, uint32_t run) {
+    if (run == 0) {
+        return false;
+    }
+    if (limiter.run != run) {
+        limiter.run = run;
+        limiter.count = 0;
+        limiter.last_log_time_us = 0;
+    }
+
+    limiter.count++;
+    const int64_t now = esp_timer_get_time();
+    if (limiter.count <= 4 || now - limiter.last_log_time_us >= 1000000) {
+        limiter.last_log_time_us = now;
+        return true;
+    }
+    return false;
+}
+
+}  // namespace
 
 NoAudioCodec::~NoAudioCodec() {
     if (rx_handle_ != nullptr) {
@@ -217,6 +248,34 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
 int NoAudioCodec::Write(const int16_t* data, int samples) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     std::vector<int32_t> buffer(samples);
+    static OutputDiagnosticLogLimiter diagnostic_limiter;
+    if (output_diagnostic_run_ != 0 && data != nullptr && samples > 0 &&
+        ShouldLogOutputDiagnostic(diagnostic_limiter, output_diagnostic_run_)) {
+        const int pcm_count = std::min(samples, 256);
+        int16_t pcm_min = data[0];
+        int16_t pcm_max = data[0];
+        for (int i = 1; i < pcm_count; ++i) {
+            pcm_min = std::min(pcm_min, data[i]);
+            pcm_max = std::max(pcm_max, data[i]);
+        }
+        ESP_LOGI(TAG,
+                 "wifi_prompt_diag no_audio_write run=%lu device_state=%d output_volume=%d output_enabled=%d "
+                 "source_sample_rate=%d output_sample_rate=%d frame_duration=%d resampled=%d "
+                 "playback_queue_remaining=%lu samples=%d first_pcm_count=%d first_pcm_min=%d first_pcm_max=%d",
+                 static_cast<unsigned long>(output_diagnostic_run_),
+                 output_diagnostic_state_,
+                 output_volume_,
+                 output_enabled_,
+                 output_diagnostic_source_sample_rate_,
+                 output_sample_rate_,
+                 output_diagnostic_source_frame_duration_,
+                 output_diagnostic_resampled_,
+                 static_cast<unsigned long>(output_diagnostic_queue_size_),
+                 samples,
+                 pcm_count,
+                 pcm_min,
+                 pcm_max);
+    }
 
     // output_volume_: 0-100
     // volume_factor_: 0-65536
