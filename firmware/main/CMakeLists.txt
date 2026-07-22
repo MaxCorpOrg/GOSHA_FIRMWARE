@@ -649,6 +649,7 @@ elseif(CONFIG_BOARD_TYPE_GOSHA_V1)
     set(BUILTIN_TEXT_FONT font_puhui_16_4)
     set(BUILTIN_ICON_FONT font_awesome_16_4)
     set(DEFAULT_EMOJI_COLLECTION otto-gif)
+    set(DEFAULT_EMOJI_TINT "FF8A00")
 elseif(CONFIG_BOARD_TYPE_ELECTRON_BOT)
     set(BOARD_TYPE "electron-bot")
     set(BUILTIN_TEXT_FONT font_puhui_20_4)
@@ -984,6 +985,11 @@ function(build_default_assets_bin)
     # Add default emoji collection if defined
     if(DEFAULT_EMOJI_COLLECTION)
         list(APPEND BUILD_ARGS "--emoji_collection" "${DEFAULT_EMOJI_COLLECTION}")
+    endif()
+
+    # Apply a board-specific tint to monochrome animated eyes when configured.
+    if(DEFAULT_EMOJI_TINT)
+        list(APPEND BUILD_ARGS "--emoji_tint" "${DEFAULT_EMOJI_TINT}")
     endif()
     
     # Add default assets extra files if defined

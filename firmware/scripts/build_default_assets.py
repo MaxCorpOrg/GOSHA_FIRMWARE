@@ -215,7 +215,98 @@ def process_text_font(text_font_file, assets_dir):
     return None
 
 
-def process_emoji_collection(emoji_collection_dir, assets_dir):
+def parse_rgb_hex(value):
+    """Parse an RRGGBB color used to tint monochrome GIF palettes."""
+    if value is None:
+        return None
+
+    normalized = value.removeprefix('#')
+    if len(normalized) != 6:
+        raise ValueError(f"Invalid emoji tint '{value}': expected RRGGBB")
+
+    try:
+        return tuple(int(normalized[index:index + 2], 16) for index in (0, 2, 4))
+    except ValueError as error:
+        raise ValueError(f"Invalid emoji tint '{value}': expected RRGGBB") from error
+
+
+def tint_gif_palette(src, dst, tint):
+    """Tint every grayscale GIF palette entry while preserving its brightness."""
+    with open(src, 'rb') as source_file:
+        data = bytearray(source_file.read())
+
+    if data[:6] not in (b'GIF87a', b'GIF89a') or len(data) < 13:
+        raise ValueError(f"Invalid GIF file: {src}")
+
+    def tint_color_table(offset, color_count):
+        table_size = color_count * 3
+        if offset + table_size > len(data):
+            raise ValueError(f"Truncated GIF color table: {src}")
+
+        for color_offset in range(offset, offset + table_size, 3):
+            red, green, blue = data[color_offset:color_offset + 3]
+            if red == green == blue:
+                intensity = red
+                data[color_offset:color_offset + 3] = bytes(
+                    round(channel * intensity / 255) for channel in tint
+                )
+
+        return offset + table_size
+
+    def skip_sub_blocks(offset):
+        while True:
+            if offset >= len(data):
+                raise ValueError(f"Truncated GIF data blocks: {src}")
+            block_size = data[offset]
+            offset += 1
+            if block_size == 0:
+                return offset
+            offset += block_size
+            if offset > len(data):
+                raise ValueError(f"Truncated GIF data block: {src}")
+
+    packed_fields = data[10]
+    offset = 13
+    if packed_fields & 0x80:
+        offset = tint_color_table(offset, 1 << ((packed_fields & 0x07) + 1))
+
+    while offset < len(data):
+        block_type = data[offset]
+        offset += 1
+
+        if block_type == 0x3B:  # GIF trailer
+            break
+        if block_type == 0x21:  # Extension block
+            if offset >= len(data):
+                raise ValueError(f"Truncated GIF extension: {src}")
+            offset += 1  # Extension label
+            offset = skip_sub_blocks(offset)
+            continue
+        if block_type == 0x2C:  # Image descriptor
+            if offset + 9 > len(data):
+                raise ValueError(f"Truncated GIF image descriptor: {src}")
+            image_packed_fields = data[offset + 8]
+            offset += 9
+            if image_packed_fields & 0x80:
+                offset = tint_color_table(
+                    offset, 1 << ((image_packed_fields & 0x07) + 1)
+                )
+            if offset >= len(data):
+                raise ValueError(f"Missing GIF image data: {src}")
+            offset += 1  # LZW minimum code size
+            offset = skip_sub_blocks(offset)
+            continue
+
+        raise ValueError(f"Unsupported GIF block 0x{block_type:02X}: {src}")
+
+    with open(dst, 'wb') as destination_file:
+        destination_file.write(data)
+    shutil.copystat(src, dst)
+    print(f"Tinted GIF: {src} -> {dst}")
+    return True
+
+
+def process_emoji_collection(emoji_collection_dir, assets_dir, emoji_tint=None):
     """Process emoji_collection parameter"""
     if not emoji_collection_dir:
         return []
@@ -239,10 +330,14 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
     for root, dirs, files in os.walk(emoji_collection_dir):
         for file in files:
             if file.lower().endswith(('.png', '.gif')):
-                # Copy file
+                # Copy the image, optionally tinting monochrome GIF palettes.
                 src_file = os.path.join(root, file)
                 dst_file = os.path.join(assets_dir, file)
-                if copy_file(src_file, dst_file):
+                if emoji_tint and file.lower().endswith('.gif'):
+                    processed = tint_gif_palette(src_file, dst_file, emoji_tint)
+                else:
+                    processed = copy_file(src_file, dst_file)
+                if processed:
                     # Get filename without extension
                     filename_without_ext = os.path.splitext(file)[0]
                     
@@ -747,7 +842,7 @@ def get_emoji_collection_path(default_emoji_collection, xiaozhi_fonts_path, proj
     return None
 
 
-def build_assets_integrated(wakenet_model_paths, multinet_model_paths, text_font_path, emoji_collection_path, extra_files_path, output_path, multinet_model_info=None):
+def build_assets_integrated(wakenet_model_paths, multinet_model_paths, text_font_path, emoji_collection_path, extra_files_path, output_path, multinet_model_info=None, emoji_tint=None):
     """
     Build assets using integrated functions (no external dependencies)
     """
@@ -767,7 +862,7 @@ def build_assets_integrated(wakenet_model_paths, multinet_model_paths, text_font
         # Process each component
         srmodels = process_sr_models(wakenet_model_paths, multinet_model_paths, temp_build_dir, assets_dir) if (wakenet_model_paths or multinet_model_paths) else None
         text_font = process_text_font(text_font_path, assets_dir) if text_font_path else None
-        emoji_collection = process_emoji_collection(emoji_collection_path, assets_dir) if emoji_collection_path else None
+        emoji_collection = process_emoji_collection(emoji_collection_path, assets_dir, emoji_tint) if emoji_collection_path else None
         extra_files = process_extra_files(extra_files_path, assets_dir) if extra_files_path else None
         
         # Generate index.json
@@ -813,6 +908,7 @@ def main():
     parser.add_argument('--sdkconfig', required=True, help='Path to sdkconfig file')
     parser.add_argument('--builtin_text_font', help='Builtin text font name (e.g., font_puhui_basic_16_4)')
     parser.add_argument('--emoji_collection', help='Default emoji collection name (e.g., emojis_32)')
+    parser.add_argument('--emoji_tint', help='Optional RRGGBB tint for monochrome GIF emoji palettes')
     parser.add_argument('--output', required=True, help='Output path for assets.bin')
     parser.add_argument('--esp_sr_model_path', help='Path to ESP-SR model directory')
     parser.add_argument('--xiaozhi_fonts_path', help='Path to xiaozhi-fonts component directory')
@@ -836,6 +932,7 @@ def main():
     print(f"  sdkconfig: {args.sdkconfig}")
     print(f"  builtin_text_font: {args.builtin_text_font}")
     print(f"  emoji_collection: {args.emoji_collection}")
+    print(f"  emoji_tint: {args.emoji_tint}")
     print(f"  output: {args.output}")
     
     # Read wake word type configuration from sdkconfig
@@ -881,6 +978,7 @@ def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
     emoji_collection_path = get_emoji_collection_path(args.emoji_collection, args.xiaozhi_fonts_path, project_root)
+    emoji_tint = parse_rgb_hex(args.emoji_tint)
     
     # Get extra files path if provided
     extra_files_path = args.extra_files
@@ -921,8 +1019,8 @@ def main():
         return
     
     # Build the assets
-    success = build_assets_integrated(wakenet_model_paths, multinet_model_paths, text_font_path, emoji_collection_path, 
-                                     extra_files_path, args.output, multinet_model_info)
+    success = build_assets_integrated(wakenet_model_paths, multinet_model_paths, text_font_path, emoji_collection_path,
+                                     extra_files_path, args.output, multinet_model_info, emoji_tint)
     
     if not success:
         sys.exit(1)
