@@ -19,6 +19,8 @@
 namespace {
 constexpr size_t kQueueLength = 16;
 constexpr TickType_t kRetryDelay = pdMS_TO_TICKS(5000);
+constexpr int kRuntimeHttpConnectId = 4;
+constexpr int kRuntimeHttpTimeoutMs = 5000;
 
 void AddString(cJSON* object, const char* key, const char* value) {
     if (object != nullptr && value != nullptr && value[0] != '\0') {
@@ -217,7 +219,8 @@ int RuntimeEventReporter::Send(const std::string& payload) {
     }
 
     auto& board = Board::GetInstance();
-    auto http = board.GetNetwork()->CreateHttp(0);
+    auto http = board.GetNetwork()->CreateHttp(kRuntimeHttpConnectId);
+    http->SetTimeout(kRuntimeHttpTimeoutMs);
     http->SetHeader("Content-Type", "application/json");
     http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     http->SetHeader("Client-Id", board.GetUuid().c_str());
@@ -229,6 +232,10 @@ int RuntimeEventReporter::Send(const std::string& payload) {
         return -1;
     }
     const int status = http->GetStatusCode();
+    // HttpClient receives data in a background task. Drain the response before
+    // closing so that the client cannot be destroyed while its receive callback
+    // is still finishing the server-side disconnect.
+    (void)http->ReadAll();
     http->Close();
     if (status >= 200 && status < 300) {
         return 1;
