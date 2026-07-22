@@ -185,6 +185,28 @@ esp_err_t Ota::CheckVersion() {
         ESP_LOGI(TAG, "No websocket section found!");
     }
 
+    cJSON* runtime_events = cJSON_GetObjectItem(root, "runtime_events");
+    if (cJSON_IsObject(runtime_events)) {
+        Settings settings("runtime_events", true);
+        cJSON* url = cJSON_GetObjectItem(runtime_events, "url");
+        cJSON* token = cJSON_GetObjectItem(runtime_events, "token");
+        cJSON* schema = cJSON_GetObjectItem(runtime_events, "schema_version");
+        cJSON* heartbeat = cJSON_GetObjectItem(runtime_events, "heartbeat_interval_seconds");
+        if (cJSON_IsString(url)) {
+            settings.SetString("url", url->valuestring);
+        }
+        if (cJSON_IsString(token)) {
+            settings.SetString("token", token->valuestring);
+        }
+        if (cJSON_IsString(schema)) {
+            settings.SetString("schema", schema->valuestring);
+        }
+        if (cJSON_IsNumber(heartbeat)) {
+            settings.SetInt("heartbeat_sec", std::max(10, heartbeat->valueint));
+        }
+        ESP_LOGI(TAG, "Runtime event delivery configured");
+    }
+
     has_server_time_ = false;
     cJSON *server_time = cJSON_GetObjectItem(root, "server_time");
     if (cJSON_IsObject(server_time)) {

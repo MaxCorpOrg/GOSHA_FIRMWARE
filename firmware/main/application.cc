@@ -9,6 +9,7 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "runtime_event_reporter.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -60,6 +61,7 @@ bool Application::SetDeviceState(DeviceState state) {
 
 void Application::Initialize() {
     auto& board = Board::GetInstance();
+    RuntimeEventReporter::GetInstance().Start();
     SetDeviceState(kDeviceStateStarting);
 
     // Setup the display
@@ -87,6 +89,9 @@ void Application::Initialize() {
 
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
+        RuntimeEventReporter::GetInstance().PublishDeviceState(
+            DeviceStateMachine::GetStateName(old_state),
+            DeviceStateMachine::GetStateName(new_state));
         xEventGroupSetBits(event_group_, MAIN_EVENT_STATE_CHANGED);
     });
 
@@ -101,6 +106,42 @@ void Application::Initialize() {
     // Set network event callback for UI updates and network state handling
     board.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
         auto display = Board::GetInstance().GetDisplay();
+        auto& runtime_events = RuntimeEventReporter::GetInstance();
+        switch (event) {
+            case NetworkEvent::Scanning:
+                runtime_events.PublishNetworkState("scanning", "connecting");
+                break;
+            case NetworkEvent::Connecting:
+                runtime_events.PublishNetworkState("connecting", "connecting");
+                break;
+            case NetworkEvent::Connected:
+                runtime_events.PublishNetworkState("connected", "available");
+                break;
+            case NetworkEvent::Disconnected:
+                runtime_events.PublishNetworkState("disconnected", "unavailable", "warning", "network_disconnected");
+                break;
+            case NetworkEvent::WifiConfigModeEnter:
+                runtime_events.PublishNetworkState("wifi_config", "connecting");
+                break;
+            case NetworkEvent::WifiConfigModeExit:
+                runtime_events.PublishNetworkState("wifi_config", "unavailable", "warning", "wifi_config_exited");
+                break;
+            case NetworkEvent::ModemDetecting:
+                runtime_events.PublishNetworkState("modem_detecting", "connecting");
+                break;
+            case NetworkEvent::ModemErrorNoSim:
+                runtime_events.PublishNetworkState("modem", "unavailable", "error", "modem_no_sim");
+                break;
+            case NetworkEvent::ModemErrorRegDenied:
+                runtime_events.PublishNetworkState("modem", "unavailable", "error", "modem_registration_denied");
+                break;
+            case NetworkEvent::ModemErrorInitFailed:
+                runtime_events.PublishNetworkState("modem", "unavailable", "error", "modem_init_failed");
+                break;
+            case NetworkEvent::ModemErrorTimeout:
+                runtime_events.PublishNetworkState("modem", "unavailable", "warning", "modem_timeout");
+                break;
+        }
         
         switch (event) {
             case NetworkEvent::Scanning:
@@ -247,6 +288,8 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_CLOCK_TICK) {
             clock_ticks_++;
+            const uint32_t uptime_seconds = static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
+            RuntimeEventReporter::GetInstance().MaybePublishHeartbeat(uptime_seconds);
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
         
@@ -1114,4 +1157,3 @@ void Application::ResetProtocol() {
         protocol_.reset();
     });
 }
-
