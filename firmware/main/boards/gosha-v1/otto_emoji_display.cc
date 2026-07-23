@@ -12,6 +12,11 @@
 #include "display/lvgl_display/lvgl_theme.h"
 
 #define TAG "OttoEmojiDisplay"
+
+#ifndef GOSHA_UI_ACCENT_COLOR
+#error "GOSHA_UI_ACCENT_COLOR must be defined for the gosha-v1 board"
+#endif
+
 OttoEmojiDisplay::OttoEmojiDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, int width, int height, int offset_x, int offset_y, bool mirror_x, bool mirror_y, bool swap_xy)
     : SpiLcdDisplay(panel_io, panel, width, height, offset_x, offset_y, mirror_x, mirror_y, swap_xy) {}
 
@@ -20,6 +25,38 @@ void OttoEmojiDisplay::SetupUI() {
     SetupPreviewImage();
     SetTheme(LvglThemeManager::GetInstance().GetTheme("dark"));
     InitializeOttoEmojis();
+}
+
+void OttoEmojiDisplay::SetTheme(Theme*) {
+    // GOSHA keeps one instrument profile: dark background with a single
+    // board-specific accent for status, connectivity and power indicators.
+    LcdDisplay::SetTheme(LvglThemeManager::GetInstance().GetTheme("dark"));
+    ApplyInstrumentProfile();
+}
+
+void OttoEmojiDisplay::ApplyInstrumentProfile() {
+    const auto accent = lv_color_hex(GOSHA_UI_ACCENT_COLOR);
+    DisplayLockGuard lock(this);
+
+    lv_obj_set_style_bg_color(lv_screen_active(), lv_color_black(), 0);
+    if (container_ != nullptr) {
+        lv_obj_set_style_bg_image_src(container_, nullptr, 0);
+        lv_obj_set_style_bg_color(container_, lv_color_black(), 0);
+    }
+
+    lv_obj_t* labels[] = {
+        network_label_,
+        status_label_,
+        notification_label_,
+        mute_label_,
+        battery_label_,
+        emoji_label_,
+    };
+    for (auto* label : labels) {
+        if (label != nullptr) {
+            lv_obj_set_style_text_color(label, accent, 0);
+        }
+    }
 }
 
 void OttoEmojiDisplay::SetupPreviewImage() {
