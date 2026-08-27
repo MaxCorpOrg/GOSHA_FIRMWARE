@@ -91,9 +91,12 @@ void Settings::SetBool(const std::string& key, bool value) {
 void Settings::EraseKey(const std::string& key) {
     if (read_write_) {
         auto ret = nvs_erase_key(nvs_handle_, key.c_str());
-        if (ret != ESP_ERR_NVS_NOT_FOUND) {
+        if (ret == ESP_OK) {
+            dirty_ = true;
+        } else if (ret != ESP_ERR_NVS_NOT_FOUND) {
             ESP_ERROR_CHECK(ret);
         }
+        dirty_ = true;
     } else {
         ESP_LOGW(TAG, "Namespace %s is not open for writing", ns_.c_str());
     }
@@ -102,6 +105,7 @@ void Settings::EraseKey(const std::string& key) {
 void Settings::EraseAll() {
     if (read_write_) {
         ESP_ERROR_CHECK(nvs_erase_all(nvs_handle_));
+        dirty_ = true;
     } else {
         ESP_LOGW(TAG, "Namespace %s is not open for writing", ns_.c_str());
     }

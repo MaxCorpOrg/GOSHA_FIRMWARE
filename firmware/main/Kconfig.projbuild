@@ -2,9 +2,12 @@ menu "GOSHA Firmware"
 
 config OTA_URL
     string "Default OTA URL"
-    default "http://151.241.228.232:18876/gosha/ota/"
+    default ""
     help
-        The application will access this URL to check for new firmwares and server address.
+        Optional owner-supplied fallback used to check for firmware updates and
+        server configuration. Keep it empty in version control and inject the
+        deployment endpoint at build time or through the "wifi/ota_url" runtime
+        setting. Temporary relay addresses must never be compiled into firmware.
 
 choice
     prompt "Flash Assets"

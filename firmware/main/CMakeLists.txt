@@ -32,6 +32,7 @@ set(SOURCES "audio/audio_codec.cc"
             "system_info.cc"
             "application.cc"
             "ota.cc"
+            "runtime_event_reporter.cc"
             "settings.cc"
             "device_state_machine.cc"
             "assets.cc"
@@ -648,6 +649,8 @@ elseif(CONFIG_BOARD_TYPE_GOSHA_V1)
     set(BUILTIN_TEXT_FONT font_puhui_16_4)
     set(BUILTIN_ICON_FONT font_awesome_16_4)
     set(DEFAULT_EMOJI_COLLECTION otto-gif)
+    set(GOSHA_UI_ACCENT_COLOR_HEX "E06F00")
+    set(DEFAULT_EMOJI_TINT "${GOSHA_UI_ACCENT_COLOR_HEX}")
 elseif(CONFIG_BOARD_TYPE_ELECTRON_BOT)
     set(BOARD_TYPE "electron-bot")
     set(BUILTIN_TEXT_FONT font_puhui_20_4)
@@ -896,6 +899,11 @@ target_compile_definitions(${COMPONENT_LIB}
                     PRIVATE BOARD_TYPE=\"${BOARD_TYPE}\" BOARD_NAME=\"${BOARD_NAME}\"
                     PRIVATE BUILTIN_TEXT_FONT=${BUILTIN_TEXT_FONT} BUILTIN_ICON_FONT=${BUILTIN_ICON_FONT}
                     )
+if(CONFIG_BOARD_TYPE_GOSHA_V1)
+    target_compile_definitions(${COMPONENT_LIB}
+                        PRIVATE GOSHA_UI_ACCENT_COLOR=0x${GOSHA_UI_ACCENT_COLOR_HEX}
+                        )
+endif()
 
 # Add generation rules
 add_custom_command(
@@ -983,6 +991,11 @@ function(build_default_assets_bin)
     # Add default emoji collection if defined
     if(DEFAULT_EMOJI_COLLECTION)
         list(APPEND BUILD_ARGS "--emoji_collection" "${DEFAULT_EMOJI_COLLECTION}")
+    endif()
+
+    # Apply a board-specific tint to monochrome animated eyes when configured.
+    if(DEFAULT_EMOJI_TINT)
+        list(APPEND BUILD_ARGS "--emoji_tint" "${DEFAULT_EMOJI_TINT}")
     endif()
     
     # Add default assets extra files if defined

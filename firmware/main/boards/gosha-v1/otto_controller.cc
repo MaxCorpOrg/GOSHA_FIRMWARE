@@ -696,7 +696,7 @@ hands_up, hands_down, hand_wave, windmill, takeoff, fitness, greeting, shy, radi
 
 Важное ограничение безопасности:
 если колеблются обе ноги или обе ступни, одна из ступней должна оставаться на 90 градусах, иначе можно повредить механику.
-Если после нескольких последовательностей нужен возврат в нейтраль, отдельно вызовите `self.otto.home` в самом конце.)TOOLS",
+Если после нескольких последовательностей нужен возврат в нейтраль, отдельно вызовите `self.otto.action` с `action=home` в самом конце.)TOOLS",
             PropertyList({Property("sequence", kPropertyTypeString,
                                    "{\"a\":[{\"s\":{\"ll\":90,\"rl\":90},\"v\":1000}]}")}),
             [this](const PropertyList& properties) -> ReturnValue {
@@ -708,7 +708,7 @@ hands_up, hands_down, hand_wave, windmill, takeoff, fitness, greeting, shy, radi
             });
 
 
-        mcp_server.AddTool("self.otto.stop", "Немедленно останавливает все действия и возвращает робота в нейтральное положение", PropertyList(),
+        mcp_server.AddTool("self.otto.stop", "Немедленно останавливает действия без запуска Home или другого нового движения", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
                                if (action_task_handle_ != nullptr) {
                                    vTaskDelete(action_task_handle_);
@@ -718,8 +718,7 @@ hands_up, hands_down, hand_wave, windmill, takeoff, fitness, greeting, shy, radi
                                PowerManager::ResumeBatteryUpdate();  // 停止动作时恢复电量更新
                                xQueueReset(action_queue_);
 
-                               QueueAction(ACTION_HOME, 1, 1000, 1, 0);
-                               return true;
+                               return "Действия остановлены без команды Home";
                            });
 
         mcp_server.AddTool(

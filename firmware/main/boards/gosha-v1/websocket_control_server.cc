@@ -1,5 +1,8 @@
 #include "websocket_control_server.h"
+#include "board.h"
 #include "mcp_server.h"
+#include "system_info.h"
+#include <esp_app_desc.h>
 #include <esp_log.h>
 #include <esp_http_server.h>
 #include <sys/param.h>
@@ -11,6 +14,91 @@ static const char* TAG = "WSControl";
 static constexpr uint16_t kWebSocketControlCtrlPort = 32769;
 
 WebSocketControlServer* WebSocketControlServer::instance_ = nullptr;
+
+namespace {
+
+bool JsonStringEquals(cJSON* item, const char* value) {
+    return item != nullptr && cJSON_IsString(item) && item->valuestring != nullptr &&
+           strcmp(item->valuestring, value) == 0;
+}
+
+bool IsLocalIdentityRequest(cJSON* root) {
+    return JsonStringEquals(cJSON_GetObjectItem(root, "type"), "gosha.identity.get") ||
+           JsonStringEquals(cJSON_GetObjectItem(root, "method"), "gosha.identity.get");
+}
+
+void AddRequestId(cJSON* reply, cJSON* request) {
+    cJSON* request_id = cJSON_GetObjectItem(request, "id");
+    if (request_id == nullptr) {
+        return;
+    }
+
+    cJSON* copied_id = cJSON_Duplicate(request_id, 1);
+    if (copied_id != nullptr) {
+        cJSON_AddItemToObject(reply, "id", copied_id);
+    }
+}
+
+esp_err_t SendJsonFrame(httpd_req_t* req, cJSON* root) {
+    char* response_text = cJSON_PrintUnformatted(root);
+    if (response_text == nullptr) {
+        ESP_LOGE(TAG, "Failed to serialize local identity response");
+        return ESP_ERR_NO_MEM;
+    }
+
+    httpd_ws_frame_t response = {};
+    response.type = HTTPD_WS_TYPE_TEXT;
+    response.payload = reinterpret_cast<uint8_t*>(response_text);
+    response.len = strlen(response_text);
+
+    esp_err_t ret = httpd_ws_send_frame(req, &response);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send local identity response: %d", ret);
+    }
+    cJSON_free(response_text);
+    return ret;
+}
+
+esp_err_t SendLocalIdentityReply(httpd_req_t* req, cJSON* request) {
+    auto& board = Board::GetInstance();
+    const esp_app_desc_t* app_desc = esp_app_get_description();
+    std::string device_id = SystemInfo::GetMacAddress();
+
+    cJSON* reply = cJSON_CreateObject();
+    cJSON* identity = cJSON_CreateObject();
+    if (reply == nullptr || identity == nullptr) {
+        if (reply != nullptr) {
+            cJSON_Delete(reply);
+        }
+        if (identity != nullptr) {
+            cJSON_Delete(identity);
+        }
+        ESP_LOGE(TAG, "Failed to allocate local identity response");
+        return ESP_ERR_NO_MEM;
+    }
+
+    cJSON_AddStringToObject(reply, "type", "gosha.identity.result");
+    cJSON_AddNumberToObject(reply, "protocol_version", 1);
+    cJSON_AddBoolToObject(reply, "ok", true);
+    AddRequestId(reply, request);
+
+    cJSON_AddStringToObject(identity, "device_id", device_id.c_str());
+    cJSON_AddStringToObject(identity, "mac_address", device_id.c_str());
+    cJSON_AddStringToObject(identity, "client_id", board.GetUuid().c_str());
+    cJSON_AddStringToObject(identity, "board_type", board.GetBoardType().c_str());
+    cJSON_AddStringToObject(identity, "board_name", BOARD_NAME);
+    if (app_desc != nullptr) {
+        cJSON_AddStringToObject(identity, "app_name", app_desc->project_name);
+        cJSON_AddStringToObject(identity, "app_version", app_desc->version);
+    }
+    cJSON_AddItemToObject(reply, "identity", identity);
+
+    esp_err_t ret = SendJsonFrame(req, reply);
+    cJSON_Delete(reply);
+    return ret;
+}
+
+}  // namespace
 
 WebSocketControlServer::WebSocketControlServer() : server_handle_(nullptr) {
     instance_ = this;
@@ -60,7 +148,7 @@ esp_err_t WebSocketControlServer::ws_handler(httpd_req_t *req) {
             free(buf);
             return ret;
         }
-        ESP_LOGI(TAG, "Got packet with message: %s", ws_pkt.payload);
+        ESP_LOGI(TAG, "Got WebSocket text packet, len=%d", ws_pkt.len);
     }
     
     ESP_LOGI(TAG, "Packet type: %d", ws_pkt.type);
@@ -142,6 +230,12 @@ void WebSocketControlServer::HandleMessage(httpd_req_t *req, const char* data, s
     
     if (root == nullptr) {
         ESP_LOGE(TAG, "Failed to parse JSON");
+        return;
+    }
+
+    if (IsLocalIdentityRequest(root)) {
+        SendLocalIdentityReply(req, root);
+        cJSON_Delete(root);
         return;
     }
 
