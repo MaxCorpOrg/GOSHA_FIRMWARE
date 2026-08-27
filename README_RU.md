@@ -32,6 +32,9 @@
   - путь: `/home/max/esp/esp-idf-v5.5.2`
 - Production-сборка `gosha-v1` требует owner-only переменную `GOSHA_OTA_URL`;
   скрипт передаёт её в `CONFIG_OTA_URL`, но не печатает значение и не хранит его в Git.
+- Статический firmware gate Draft PR `#24` на `7751a3ca326174d217536f6a8de7c09433c3e955`
+  получил terminal `PASS` AI Office на фактическом `GPT-5.5 / xhigh` без P0/P1/P2.
+  PR остаётся Draft/Open; собранный с `.invalid` endpoint артефакт не предназначен для установки.
 - Первая полная сборка уже выполнена успешно.
 - Получены первые артефакты:
   - `/home/max/GOSHA_FIRMWARE/firmware/build/merged-binary.bin`

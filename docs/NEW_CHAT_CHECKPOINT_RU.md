@@ -2,10 +2,10 @@
 
 ## Самая свежая точка 2026-08-27
 
-- В отдельной чистой ветке подготовлена статическая remediation-правка опубликованного `feature/firmware-orange-eyes @ 8ac1e3f`: OTA-default больше не содержит временный relay, production-сборка требует owner-only `GOSHA_OTA_URL`, чувствительные Wi-Fi/activation/Authorization-логи удалены, неполная `runtime_events` конфигурация очищает старый маршрут и token, `self.otto.stop` не запускает `Home`, а `git diff --check origin/main` чист.
+- В Draft PR `#24` опубликована статическая remediation-правка `feature/firmware-orange-eyes @ 7751a3ca326174d217536f6a8de7c09433c3e955`: OTA-default больше не содержит временный relay, production-сборка требует owner-only `GOSHA_OTA_URL`, чувствительные Wi-Fi/activation/Authorization-логи удалены, неполная `runtime_events` конфигурация очищает старый маршрут и token, `self.otto.stop` не запускает `Home`, а `git diff --check origin/main` чист.
 - Полная сборка ESP-IDF 5.5.2 с тестовым `.invalid` endpoint прошла без доступа к устройству: `gosha.bin` — `3652384` байт, 12% app-раздела свободно. Полученный ZIP не является deployable-артефактом.
 - Upstream symlink `_codeql_detected_source_root`, который блокировал защищённую упаковку workspace AI Office, удалён как неиспользуемый служебный marker.
-- Следующий шаг — commit/push remediation-ветки и immutable terminal review GPT-5.5/xhigh через AI Office. До его `PASS`, а также до замены левой сервы, merge, flash, USB/serial, motion и trim запрещены.
+- Immutable terminal review `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом `GPT-5.5 / xhigh` дал `PASS`, P0/P1/P2 нет. Следующий шаг — закрепить принятый firmware head в общей контрольной точке; PR оставить Draft/Open. До замены левой сервы flash, USB/serial, перезагрузка ради теста, motion и trim запрещены.
 
 ## Предыдущая точка 2026-08-25
 

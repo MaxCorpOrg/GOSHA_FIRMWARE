@@ -2,14 +2,14 @@
 
 ## Свежая контрольная точка 2026-08-27
 
-- Статический remediation-gate ведётся от опубликованного `feature/firmware-orange-eyes @ 8ac1e3f`; исходный аудит GPT-5.5 дал `NO-GO` из-за hardcoded временного relay, хвостовых пробелов в новом vendored-компоненте и чувствительных runtime-логов.
+- Статический remediation-gate опубликован в Draft PR `#24` как `feature/firmware-orange-eyes @ 7751a3ca326174d217536f6a8de7c09433c3e955`; исходный аудит GPT-5.5 дал `NO-GO` из-за hardcoded временного relay, хвостовых пробелов в новом vendored-компоненте и чувствительных runtime-логов, а перечисленные блокеры закрыты в опубликованном head.
 - OTA/config больше не имеет сетевого адреса в Git-default. Production-сборка `gosha-v1` требует owner-only `GOSHA_OTA_URL`, валидирует абсолютный HTTP(S)-URL без встроенных учётных данных и печатает только `CONFIG_OTA_URL=<owner-supplied>`.
 - При пустом OTA/config endpoint загрузочный version-check завершается сразу, без длительного цикла повторов. Wi-Fi-пароль и activation payload больше не печатаются.
 - Секция `runtime_events` применяется целиком: при её отсутствии или неполных `url`/`token` старый endpoint и token удаляются из NVS. HTTP-клиент больше не печатает полный набор заголовков с `Authorization`.
 - `self.otto.stop` больше не ставит `ACTION_HOME`: он останавливает текущую задачу, возобновляет обновление батареи и очищает очередь без запуска нового движения.
 - `git diff --check origin/main` чист. Статическая сборка ESP-IDF 5.5.2 с неразрешимым тестовым endpoint `.invalid` прошла без flash: `gosha.bin` — `3652384` байт, свободно 12% app-раздела; ZIP является только доказательством сборки и не предназначен для установки.
 - Неиспользуемый upstream symlink `_codeql_detected_source_root` удалён: защищённый workspace-export AI Office запрещает symlink и до удаления завершался `unsupported_git_entry` ещё до запуска reviewer-модели.
-- До публикации remediation-SHA и terminal `PASS` AI Office merge остаётся `NO-GO`. Из-за неисправной левой сервы flash, USB/serial, перезагрузка ради теста, motion и trim по-прежнему запрещены.
+- Immutable AI Office review `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом `GPT-5.5 / xhigh` завершился terminal `PASS` без P0/P1/P2. Статический gate закрыт, однако PR остаётся Draft/Open и не сливается до общей последовательной приёмки. Из-за неисправной левой сервы flash, USB/serial, перезагрузка ради теста, motion и trim по-прежнему запрещены.
 
 ## Предыдущая контрольная точка 2026-08-25
 
