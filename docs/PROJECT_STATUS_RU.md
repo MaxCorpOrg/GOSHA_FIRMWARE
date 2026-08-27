@@ -7,7 +7,7 @@
 - Пустой endpoint обрабатывается fail-fast, без экспоненциального цикла повторов. `self.otto.stop` теперь останавливает текущую задачу без постановки `ACTION_HOME`.
 - Чувствительные Wi-Fi/activation-логи обезличены; HTTP-клиент не печатает `Authorization`. `runtime_events` применяется replace-whole и очищает старый endpoint/token при отсутствии полной секции. Vendored whitespace очищен, `git diff --check origin/main` проходит.
 - Неиспользуемый upstream symlink `_codeql_detected_source_root` удалён, поскольку secure workspace-export AI Office отклоняет symlink как `unsupported_git_entry` до запуска модели.
-- Каноническая сборка ESP-IDF 5.5.2 с неразрешимым тестовым `.invalid` endpoint прошла без flash: `gosha.bin` — `3652256` байт, свободно 12% app-раздела. Собранный ZIP — только статическое доказательство компиляции, устанавливать его нельзя.
+- Каноническая сборка ESP-IDF 5.5.2 с неразрешимым тестовым `.invalid` endpoint прошла без flash: `gosha.bin` — `3652384` байт, свободно 12% app-раздела. Собранный ZIP — только статическое доказательство компиляции, устанавливать его нельзя.
 - До commit/push и immutable terminal `PASS` GPT-5.5/xhigh через AI Office merge остаётся `NO-GO`. Неисправная левая серва отдельно сохраняет запрет на flash, USB/serial, motion и trim.
 
 ## Контрольная точка нового робота 2026-08-25
