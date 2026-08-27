@@ -33,9 +33,9 @@ protected:
     EventGroupHandle_t event_group_handle_;
     std::list<UrcCallback>::iterator urc_callback_it_;
     int last_error_ = 0;
-    
+
     // 虚函数允许子类自定义SSL配置
     virtual bool ConfigureSsl(int port);
 };
 
-#endif // ML307_TCP_H 
+#endif // ML307_TCP_H

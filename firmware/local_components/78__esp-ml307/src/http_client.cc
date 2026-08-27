@@ -45,9 +45,9 @@ bool HttpClient::IsConnectionReusable(const std::string& host, int port) const {
     // 3. 没有连接错误
     // 4. 上一次响应支持 Keep-Alive
     // 5. 上一次请求已完成（数据已接收完整）
-    return connected_ && 
-           host_ == host && 
-           port_ == port && 
+    return connected_ &&
+           host_ == host &&
+           port_ == port &&
            !connection_error_ &&
            server_keep_alive_ &&
            IsDataComplete();
@@ -170,14 +170,14 @@ std::string HttpClient::BuildHttpRequest() {
 bool HttpClient::Open(const std::string& method, const std::string& url) {
     method_ = method;
     url_ = url;
-    
+
     if (!ParseUrl(url)) {
         return false;
     }
 
     // 检查是否可以复用现有连接
     bool can_reuse = IsConnectionReusable(host_, port_);
-    
+
     if (can_reuse) {
         ESP_LOGI(TAG, "Reusing existing connection to %s:%d", host_.c_str(), port_);
         // 只重置请求状态，不关闭连接（不会清空 content_）
@@ -190,10 +190,10 @@ bool HttpClient::Open(const std::string& method, const std::string& url) {
             connected_ = false;
             closed_ = true;
         }
-        
+
         // 重置所有状态（不会清空 content_）
         ResetRequestState();
-        
+
         // 建立新的 TCP 连接
         if (protocol_ == "https") {
             tcp_ = network_->CreateSsl(connect_id_);
@@ -210,18 +210,18 @@ bool HttpClient::Open(const std::string& method, const std::string& url) {
         tcp_->OnDisconnected([this]() {
             OnTcpDisconnected();
         });
-        
+
         if (!tcp_->Connect(host_, port_)) {
             last_error_ = tcp_->GetLastError();
             ESP_LOGE(TAG, "TCP connection failed, code=0x%x", last_error_);
             return false;
         }
-        
+
         connected_ = true;
         closed_ = false;
         ESP_LOGI(TAG, "Established new connection to %s:%d", host_.c_str(), port_);
     }
-    
+
     request_chunked_ = (method_ == "POST" || method_ == "PUT") && !content_.has_value();
 
     // 构建并发送 HTTP 请求
@@ -336,7 +336,7 @@ void HttpClient::ProcessReceivedData() {
                             ESP_LOGD(TAG, "Server will close connection");
                         }
                     }
-                    
+
                     // 检查是否为 chunked 编码
                     auto it = response_headers_.find("transfer-encoding");
                     if (it != response_headers_.end() &&
@@ -697,7 +697,7 @@ std::string HttpClient::GetResponseHeader(const std::string& key) const {
     // 转换为小写进行查找
     std::string lower_key = key;
     std::transform(lower_key.begin(), lower_key.end(), lower_key.begin(), ::tolower);
-    
+
     auto it = response_headers_.find(lower_key);
     if (it != response_headers_.end()) {
         return it->second.value;

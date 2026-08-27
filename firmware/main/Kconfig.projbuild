@@ -1,10 +1,12 @@
 menu "GOSHA Firmware"
 
 config OTA_URL
-    string "Default OTA URL"
-    default "http://151.241.228.232:18876/gosha/ota/"
+    string "Fallback OTA URL"
+    default ""
     help
-        The application will access this URL to check for new firmwares and server address.
+        Optional fallback URL used only when the runtime wifi/ota_url setting is absent.
+        Production GOSHA builds must provide the OTA/config endpoint through owner-only
+        runtime configuration instead of hardcoding a public relay or server address.
 
 choice
     prompt "Flash Assets"

@@ -40,7 +40,7 @@ struct AtArgumentValue {
     std::string string_value;
     int int_value;
     double double_value;
-    
+
     std::string ToString() const {
         switch (type) {
             case Type::String:
@@ -64,21 +64,21 @@ public:
     ~AtUart();
 
     void Initialize();
-    
+
     // Baud Rate Management
     bool SetBaudRate(int new_baud_rate, int timeout_ms = -1);
     int GetBaudRate() const { return baud_rate_; }
-    
+
     // Data Sending
     bool SendCommand(const std::string& command, size_t timeout_ms = 1000, bool add_crlf = true);
     bool SendCommandWithData(const std::string& command, size_t timeout_ms = 1000, bool add_crlf = true, const char* data = nullptr, size_t data_length = 0);
     std::string GetResponse() const;
     int GetCmeErrorCode() const { return cme_error_code_; }
-    
+
     // Callback Management
     std::list<UrcCallback>::iterator RegisterUrcCallback(UrcCallback callback);
     void UnregisterUrcCallback(std::list<UrcCallback>::iterator iterator);
-    
+
     // Control Interface
     void SetDtrPin(bool high);
     bool GetDtrPin() const { return dtr_pin_state_; }
@@ -110,22 +110,22 @@ private:
     esp_pm_lock_handle_t pm_lock_;
     esp_pm_lock_handle_t ri_pm_lock_;  // RI pin PM lock
     bool ri_pm_lock_acquired_;  // Track RI PM lock state
-    
+
     // DMA controller
     UartUhci uart_uhci_;
-    
+
     // FreeRTOS Objects
     TaskHandle_t receive_task_handle_ = nullptr;
     TaskHandle_t event_task_handle_ = nullptr;  // Task for parsing and event handling
     QueueHandle_t rx_data_queue_;  // Queue for DMA received data
     EventGroupHandle_t event_group_handle_;
-    
+
     std::string rx_buffer_;
     std::mutex rx_buffer_mutex_;  // Mutex to protect rx_buffer_ access
-    
+
     // Callback Functions
     std::list<UrcCallback> urc_callbacks_;
-    
+
     // Internal Methods
     void ReceiveTask();   // Task for receiving data from DMA queue
     void EventTask();     // Task for parsing response and handling events
@@ -134,13 +134,13 @@ private:
     // Handle URC
     void HandleUrc(const std::string& command, const std::vector<AtArgumentValue>& arguments);
     bool SendData(const char* data, size_t length);
-    
+
     // DMA RX Callback (called from ISR context)
     static bool IRAM_ATTR DmaRxCallback(const UartUhci::RxEventData& data, void* user_data);
-    
+
     // DMA Overflow Callback (called from ISR context when buffer exhaustion detected)
     static bool IRAM_ATTR DmaOverflowCallback(void* user_data);
-    
+
     // RI Pin ISR Handler
     static void IRAM_ATTR RiPinIsrHandler(void* arg);
 

@@ -74,7 +74,7 @@ void AtUart::Initialize() {
     if (initialized_) {
         return;
     }
-    
+
     event_group_handle_ = xEventGroupCreate();
     if (!event_group_handle_) {
         ESP_LOGE(TAG, "创建事件组失败");
@@ -95,13 +95,13 @@ void AtUart::Initialize() {
     uart_config.parity = UART_PARITY_DISABLE;
     uart_config.stop_bits = UART_STOP_BITS_1;
     uart_config.source_clk = UART_SCLK_DEFAULT;
-    
+
     ESP_ERROR_CHECK(uart_param_config(uart_num_, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(uart_num_, tx_pin_, rx_pin_, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    
+
     // Enable pull-up on RX pin
     gpio_set_pull_mode(rx_pin_, GPIO_PULLUP_ONLY);
-    
+
     // Initialize UHCI DMA controller
     UartUhci::Config uhci_cfg = {
         .uart_port = uart_num_,
@@ -111,26 +111,26 @@ void AtUart::Initialize() {
             .buffer_size = AT_UART_RX_BUFFER_SIZE,
         },
     };
-    
+
     esp_err_t ret = uart_uhci_.Init(uhci_cfg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "UHCI初始化失败: %s", esp_err_to_name(ret));
         return;
     }
-    
+
     // Register DMA RX callback
     uart_uhci_.SetRxCallback(DmaRxCallback, this);
-    
+
     // Register DMA overflow callback
     uart_uhci_.SetOverflowCallback(DmaOverflowCallback, this);
-    
+
     // Start DMA receive
     ret = uart_uhci_.StartReceive();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "启动DMA接收失败: %s", esp_err_to_name(ret));
         return;
     }
-    
+
     if (dtr_pin_ != GPIO_NUM_NC) {
         gpio_config_t config = {};
         config.pin_bit_mask = (1ULL << dtr_pin_);
@@ -180,14 +180,14 @@ void AtUart::Initialize() {
 bool IRAM_ATTR AtUart::DmaRxCallback(const UartUhci::RxEventData& data, void* user_data) {
     AtUart* self = static_cast<AtUart*>(user_data);
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    
+
     if (data.buffer && data.recv_size > 0) {
         // Send buffer pointer to queue for processing in task context
         // The buffer will be returned by ReceiveTask after processing
         RxDataItem item;
         item.buffer = data.buffer;
         item.size = data.recv_size;
-        
+
         if (xQueueSendFromISR(self->rx_data_queue_, &item, &xHigherPriorityTaskWoken) != pdTRUE) {
             // Queue full, return buffer immediately
             ESP_DRAM_LOGW("AtUart", "RX queue full, dropping %u bytes", data.recv_size);
@@ -198,7 +198,7 @@ bool IRAM_ATTR AtUart::DmaRxCallback(const UartUhci::RxEventData& data, void* us
         ESP_DRAM_LOGW("AtUart", "Empty buffer received, size=%u", data.recv_size);
         self->uart_uhci_.ReturnBuffer(data.buffer);
     }
-    
+
     return xHigherPriorityTaskWoken == pdTRUE;
 }
 
@@ -206,10 +206,10 @@ bool IRAM_ATTR AtUart::DmaRxCallback(const UartUhci::RxEventData& data, void* us
 bool IRAM_ATTR AtUart::DmaOverflowCallback(void* user_data) {
     AtUart* self = static_cast<AtUart*>(user_data);
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    
+
     // Signal overflow event to ReceiveTask
     xEventGroupSetBitsFromISR(self->event_group_handle_, AT_EVENT_FIFO_OVERFLOW, &xHigherPriorityTaskWoken);
-    
+
     return xHigherPriorityTaskWoken == pdTRUE;
 }
 
@@ -239,15 +239,15 @@ void AtUart::EventTask() {
     // This task handles parsing and event processing
     // It runs at lower priority so ReceiveTask can quickly return DMA buffers
     while (true) {
-        auto bits = xEventGroupWaitBits(event_group_handle_, 
+        auto bits = xEventGroupWaitBits(event_group_handle_,
             AT_EVENT_PARSE_NEEDED | AT_EVENT_RI_PIN_INT | AT_EVENT_FIFO_OVERFLOW,
             pdTRUE, pdFALSE, portMAX_DELAY);
-        
+
         if (bits & AT_EVENT_PARSE_NEEDED) {
             // Parse all available responses
             while (ParseResponse()) {}
         }
-        
+
         if (bits & AT_EVENT_FIFO_OVERFLOW) {
             // DMA buffer exhaustion detected - notify upper layer via URC
             ESP_LOGW(TAG, "DMA buffer overflow detected, notifying upper layer");
@@ -282,15 +282,15 @@ static bool is_number(const std::string& s) {
 bool AtUart::ParseResponse() {
     std::string command, values;
     std::string::size_type end_pos;
-    
+
     // Lock rx_buffer_ for the duration of parsing
     {
         std::lock_guard<std::mutex> lock(rx_buffer_mutex_);
-        
+
         if (rx_buffer_.empty()) {
             return false;
         }
-        
+
         if (wait_for_response_ && rx_buffer_[0] == '>') {
             rx_buffer_.erase(0, 1);
             xEventGroupSetBits(event_group_handle_, AT_EVENT_COMMAND_DONE);
@@ -356,7 +356,7 @@ bool AtUart::ParseResponse() {
             return true;
         }
     }
-    
+
     // Handle URC outside the rx_buffer_ lock to avoid blocking ReceiveTask
     if (!command.empty()) {
         // Parse "string", int, int, ... into AtArgumentValue
@@ -385,7 +385,7 @@ bool AtUart::ParseResponse() {
         HandleUrc(command, arguments);
         return true;
     }
-    
+
     return false;
 }
 
@@ -406,7 +406,7 @@ bool AtUart::DetectBaudRate(int timeout_ms) {
     int baud_rates[] = {115200, 921600, 460800, 230400, 57600, 38400, 19200, 9600};
     TickType_t start_time = xTaskGetTickCount();
     TickType_t timeout_ticks = (timeout_ms == -1) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-    
+
     while (true) {
         ESP_LOGI(TAG, "Detecting baud rate...");
         for (size_t i = 0; i < sizeof(baud_rates) / sizeof(baud_rates[0]); i++) {
@@ -418,7 +418,7 @@ bool AtUart::DetectBaudRate(int timeout_ms) {
                 return true;
             }
         }
-        
+
         // Check timeout before delay if specified
         if (timeout_ms != -1) {
             TickType_t elapsed = xTaskGetTickCount() - start_time;
@@ -427,7 +427,7 @@ bool AtUart::DetectBaudRate(int timeout_ms) {
                 return false;
             }
         }
-        
+
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     return false;
@@ -457,7 +457,7 @@ bool AtUart::SendData(const char* data, size_t length) {
         ESP_LOGE(TAG, "UART未初始化");
         return false;
     }
-    
+
     esp_err_t ret = uart_uhci_.Transmit(reinterpret_cast<const uint8_t*>(data), length);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "UHCI transmit failed: %s", esp_err_to_name(ret));

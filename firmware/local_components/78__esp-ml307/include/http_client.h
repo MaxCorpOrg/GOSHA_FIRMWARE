@@ -35,7 +35,7 @@ public:
     void Close() override;
     int Read(char* buffer, size_t buffer_size) override;
     int Write(const char* buffer, size_t buffer_size) override;
-    
+
     // Keep-Alive support
     void SetKeepAlive(bool enable);
     bool IsConnectionReusable(const std::string& host, int port) const;
@@ -51,15 +51,15 @@ private:
     struct DataChunk {
         std::string data;
         size_t offset = 0;  // 当前读取偏移
-        
+
         // 使用移动构造函数避免拷贝
         DataChunk(std::string&& d) : data(std::move(d)), offset(0) {}
         DataChunk(const std::string& d) : data(d), offset(0) {}
-        
+
         size_t available() const {
             return data.size() - offset;
         }
-        
+
         size_t read(char* buffer, size_t size) {
             size_t bytes_to_read = std::min(size, available());
             if (bytes_to_read > 0) {
@@ -68,7 +68,7 @@ private:
             }
             return bytes_to_read;
         }
-        
+
         bool empty() const {
             return offset >= data.size();
         }
@@ -78,9 +78,9 @@ private:
     struct HeaderEntry {
         std::string original_key;  // 保留原始大小写的key（用于输出HTTP头部）
         std::string value;         // 头部值
-        
+
         HeaderEntry() = default;
-        HeaderEntry(const std::string& key, const std::string& val) 
+        HeaderEntry(const std::string& key, const std::string& val)
             : original_key(key), value(val) {}
     };
 
@@ -90,13 +90,13 @@ private:
     EventGroupHandle_t event_group_handle_;
     std::mutex mutex_;
     std::condition_variable cv_;
-    
+
     // 用于读取操作的专门锁和缓冲区队列
     std::mutex read_mutex_;
     std::deque<DataChunk> body_chunks_;
     std::condition_variable write_cv_;
     const size_t MAX_BODY_CHUNKS_SIZE = 8192;
-    
+
     int status_code_ = -1;
     int timeout_ms_ = 30000;
     std::string rx_buffer_;
@@ -109,7 +109,7 @@ private:
     int port_ = 80;
     std::optional<std::string> content_ = std::nullopt;
     std::map<std::string, HeaderEntry> response_headers_;  // key为小写，用于快速查找
-    
+
     // 移除原来的 body_ 变量，现在使用 body_chunks_ 队列
     size_t body_offset_ = 0;
     size_t content_length_ = 0;
@@ -124,7 +124,7 @@ private:
     bool server_keep_alive_ = false;  // 新增：服务器是否支持 Keep-Alive
     bool closed_ = true;
     int last_error_ = 0;  // 存储最后一次错误码
-    
+
     // HTTP 协议解析状态
     enum class ParseState {
         STATUS_LINE,
@@ -153,14 +153,14 @@ private:
     std::string GetNextLine(std::string& buffer);
     bool HasCompleteLine(const std::string& buffer);
     void SetError();
-    
+
     // 新增：向读取队列添加数据的方法
     void AddBodyData(const std::string& data);
     void AddBodyData(std::string&& data);  // 移动版本
-    
+
     // 新增：检查数据是否完整接收
     bool IsDataComplete() const;
-    
+
     // 新增：重置请求状态（用于连接复用）
     void ResetRequestState();
 };

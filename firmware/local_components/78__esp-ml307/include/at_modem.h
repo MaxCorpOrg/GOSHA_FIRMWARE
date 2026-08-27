@@ -52,7 +52,7 @@ public:
     static std::unique_ptr<AtModem> Detect(gpio_num_t tx_pin, gpio_num_t rx_pin, gpio_num_t dtr_pin = GPIO_NUM_NC, int baud_rate = 115200, int timeout_ms = -1);
     // 静态检测方法（带 RI pin）
     static std::unique_ptr<AtModem> Detect(gpio_num_t tx_pin, gpio_num_t rx_pin, gpio_num_t dtr_pin, gpio_num_t ri_pin, int baud_rate, int timeout_ms = -1);
-    
+
     // 构造函数和析构函数
     AtModem(std::shared_ptr<AtUart> at_uart);
     virtual ~AtModem();
@@ -98,4 +98,4 @@ protected:
     std::function<void(bool network_state)> on_network_state_changed_;
 };
 
-#endif // _AT_MODEM_H_ 
+#endif // _AT_MODEM_H_

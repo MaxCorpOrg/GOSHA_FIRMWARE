@@ -22,4 +22,4 @@ bool Ml307Ssl::ConfigureSsl(int port) {
     }
 
     return true;
-} 
+}

@@ -215,7 +215,7 @@ int RuntimeEventReporter::Send(const std::string& payload) {
     const int configured_interval = settings.GetInt("heartbeat_sec", 30);
     heartbeat_interval_seconds_.store(static_cast<uint32_t>(configured_interval < 10 ? 10 : configured_interval));
     if (url.empty() || token.empty()) {
-        return -1;
+        return 0;
     }
 
     auto& board = Board::GetInstance();

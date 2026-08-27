@@ -89,7 +89,7 @@ bool EspSsl::Connect(const std::string& host, int port) {
 
 void EspSsl::Disconnect() {
     connected_ = false;
-    
+
     // Close socket if it is open
     if (tls_client_ != nullptr) {
         int sockfd = -1;
@@ -137,7 +137,7 @@ int EspSsl::Send(const std::string& data) {
     size_t total_sent = 0;
     size_t data_size = data.size();
     const char* data_ptr = data.data();
-    
+
     while (total_sent < data_size) {
         int ret = esp_tls_conn_write(tls_client_, data_ptr + total_sent, data_size - total_sent);
 
@@ -149,10 +149,10 @@ int EspSsl::Send(const std::string& data) {
             ESP_LOGE(TAG, "SSL send failed: ret=%d, errno=%d", ret, errno);
             return ret;
         }
-        
+
         total_sent += ret;
     }
-    
+
     return total_sent;
 }
 
@@ -177,7 +177,7 @@ void EspSsl::ReceiveTask() {
             }
             break;
         }
-        
+
         if (stream_callback_) {
             data.resize(ret);
             stream_callback_(data);

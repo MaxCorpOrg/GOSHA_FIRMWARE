@@ -106,7 +106,7 @@ void EspUdp::ReceiveTask() {
             connected_ = false;
             break;
         }
-        
+
         if (message_callback_) {
             data.resize(ret);
             message_callback_(data);

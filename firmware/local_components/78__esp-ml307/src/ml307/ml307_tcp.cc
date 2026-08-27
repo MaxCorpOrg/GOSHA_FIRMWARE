@@ -125,7 +125,7 @@ void Ml307Tcp::Disconnect() {
     if (!instance_active_) {
         return;
     }
-    
+
     std::string command = "AT+MIPCLOSE=" + std::to_string(tcp_id_);
     if (at_uart_->SendCommand(command)) {
         xEventGroupWaitBits(event_group_handle_, ML307_TCP_DISCONNECTED, pdTRUE, pdFALSE, pdMS_TO_TICKS(TCP_CONNECT_TIMEOUT_MS));
@@ -163,7 +163,7 @@ int Ml307Tcp::Send(const std::string& data) {
 
     while (total_sent < data.size()) {
         size_t chunk_size = std::min(data.size() - total_sent, MAX_PACKET_SIZE);
-        
+
         // 重置command并构建新的命令，利用预分配的容量
         command.clear();
         command += "AT+MIPSEND=";
@@ -171,11 +171,11 @@ int Ml307Tcp::Send(const std::string& data) {
         command += ",";
         command += std::to_string(chunk_size);
         command += ",";
-        
+
         // 直接在command字符串上进行十六进制编码
         at_uart_->EncodeHexAppend(command, data.data() + total_sent, chunk_size);
         command += "\r\n";
-        
+
         // 根据波特率和命令长度动态计算超时：传输时间(10位/字节) + 处理余量
         int baud = at_uart_->GetBaudRate();
         if (baud <= 0) baud = 115200;

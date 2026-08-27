@@ -17,7 +17,7 @@ static std::string base64_encode(const unsigned char *data, size_t len) {
     size_t i = 0;
     while (i < len) {
         size_t chunk_size = std::min((size_t)3, len - i);
-        
+
         for (size_t j = 0; j < 3; j++) {
             char_array_3[j] = (j < chunk_size) ? data[i + j] : 0;
         }
@@ -96,7 +96,7 @@ bool WebSocket::Connect(const char* uri) {
     } else {
         host = uri_str.substr(pos, next_pos - pos);
         pos = next_pos + 1;
-        
+
         // 解析端口
         next_pos = uri_str.find('/', pos);
         if (next_pos == std::string::npos) {
@@ -114,7 +114,7 @@ bool WebSocket::Connect(const char* uri) {
     SetHeader("Upgrade", "websocket");
     SetHeader("Connection", "Upgrade");
     SetHeader("Sec-WebSocket-Version", "13");
-    
+
     // 生成随机的 Sec-WebSocket-Key
     char key[25];
     for (int i = 0; i < 16; ++i) {
@@ -153,7 +153,7 @@ bool WebSocket::Connect(const char* uri) {
 
     // 清除事件位
     xEventGroupClearBits(handshake_event_group_, HANDSHAKE_SUCCESS_BIT | HANDSHAKE_FAILED_BIT);
-    
+
     // 设置数据接收回调来处理握手和后续的WebSocket帧
     tcp_->OnStream([this](const std::string& data) {
         this->OnTcpData(data);
@@ -286,14 +286,14 @@ int WebSocket::GetLastError() {
 void WebSocket::OnTcpData(const std::string& data) {
     // 将新数据追加到接收缓冲区
     receive_buffer_.append(data);
-    
+
     if (!handshake_completed_) {
         // 检查握手响应
         size_t pos = receive_buffer_.find("\r\n\r\n");
         if (pos != std::string::npos) {
             std::string handshake_response = receive_buffer_.substr(0, pos + 4);
             receive_buffer_ = receive_buffer_.substr(pos + 4);
-            
+
             if (handshake_response.find("HTTP/1.1 101") != std::string::npos) {
                 handshake_completed_ = true;
                 // 设置握手成功事件
@@ -309,12 +309,12 @@ void WebSocket::OnTcpData(const std::string& data) {
             return;
         }
     }
-    
+
     // 处理WebSocket帧
     size_t buffer_offset = 0;
     const uint8_t* buffer = reinterpret_cast<const uint8_t*>(receive_buffer_.data());
     size_t buffer_size = receive_buffer_.size();
-    
+
     while (buffer_offset < buffer_size) {
         if (buffer_size - buffer_offset < 2) break; // 需要更多数据
 

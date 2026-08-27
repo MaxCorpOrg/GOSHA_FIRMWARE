@@ -55,24 +55,24 @@ static const char *TAG = "ML307_DEMO";
 extern "C" void app_main(void) {
     // 自动检测并初始化模组
     auto modem = AtModem::Detect(GPIO_NUM_13, GPIO_NUM_14, GPIO_NUM_15, 921600);
-    
+
     if (!modem) {
         ESP_LOGE(TAG, "模组检测失败");
         return;
     }
-    
+
     // 设置网络状态回调
     modem->OnNetworkStateChanged([](bool ready) {
         ESP_LOGI(TAG, "网络状态: %s", ready ? "已连接" : "已断开");
     });
-    
+
     // 等待网络就绪
     NetworkStatus status = modem->WaitForNetworkReady(30000);
     if (status != NetworkStatus::Ready) {
         ESP_LOGE(TAG, "网络连接失败");
         return;
     }
-    
+
     // 打印模组信息
     ESP_LOGI(TAG, "模组版本: %s", modem->GetModuleRevision().c_str());
     ESP_LOGI(TAG, "IMEI: %s", modem->GetImei().c_str());
@@ -90,25 +90,25 @@ void TestHttp(std::unique_ptr<AtModem>& modem) {
 
     // 创建 HTTP 客户端
     auto http = modem->CreateHttp(0);
-    
+
     // 设置请求头
     http->SetHeader("User-Agent", "Xiaozhi/3.0.0");
     http->SetTimeout(10000);
-    
+
     // 发送 GET 请求
     if (http->Open("GET", "https://httpbin.org/json")) {
         ESP_LOGI(TAG, "HTTP 状态码: %d", http->GetStatusCode());
         ESP_LOGI(TAG, "响应内容长度: %zu bytes", http->GetBodyLength());
-        
+
         // 读取响应内容
         std::string response = http->ReadAll();
         ESP_LOGI(TAG, "响应内容: %s", response.c_str());
-        
+
         http->Close();
     } else {
         ESP_LOGE(TAG, "HTTP 请求失败");
     }
-    
+
     // unique_ptr 会自动释放内存，无需手动 delete
 }
 ```
@@ -121,36 +121,36 @@ void TestMqtt(std::unique_ptr<AtModem>& modem) {
 
     // 创建 MQTT 客户端
     auto mqtt = modem->CreateMqtt(0);
-    
+
     // 设置回调函数
     mqtt->OnConnected([]() {
         ESP_LOGI(TAG, "MQTT 连接成功");
     });
-    
+
     mqtt->OnDisconnected([]() {
         ESP_LOGI(TAG, "MQTT 连接断开");
     });
-    
+
     mqtt->OnMessage([](const std::string& topic, const std::string& payload) {
         ESP_LOGI(TAG, "收到消息 [%s]: %s", topic.c_str(), payload.c_str());
     });
-    
+
     // 连接到 MQTT 代理
     if (mqtt->Connect("broker.emqx.io", 1883, "esp32_client", "", "")) {
         // 订阅主题
         mqtt->Subscribe("test/esp32/message");
-        
+
         // 发布消息
         mqtt->Publish("test/esp32/hello", "Hello from ESP32!");
-        
+
         // 等待一段时间接收消息
         vTaskDelay(pdMS_TO_TICKS(5000));
-        
+
         mqtt->Disconnect();
     } else {
         ESP_LOGE(TAG, "MQTT 连接失败");
     }
-    
+
     // unique_ptr 会自动释放内存，无需手动 delete
 }
 ```
@@ -163,27 +163,27 @@ void TestWebSocket(std::unique_ptr<AtModem>& modem) {
 
     // 创建 WebSocket 客户端
     auto ws = modem->CreateWebSocket(0);
-    
+
     // 设置请求头
     ws->SetHeader("Protocol-Version", "3");
-    
+
     // 设置回调函数
     ws->OnConnected([]() {
         ESP_LOGI(TAG, "WebSocket 连接成功");
     });
-    
+
     ws->OnData([](const char* data, size_t length, bool binary) {
         ESP_LOGI(TAG, "收到数据: %.*s", (int)length, data);
     });
-    
+
     ws->OnDisconnected([]() {
         ESP_LOGI(TAG, "WebSocket 连接断开");
     });
-    
+
     ws->OnError([](int error) {
         ESP_LOGE(TAG, "WebSocket 错误: %d", error);
     });
-    
+
     // 连接到 WebSocket 服务器
     if (ws->Connect("wss://echo.websocket.org/")) {
         // 发送消息
@@ -192,12 +192,12 @@ void TestWebSocket(std::unique_ptr<AtModem>& modem) {
             ws->Send(message);
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
-        
+
         ws->Close();
     } else {
         ESP_LOGE(TAG, "WebSocket 连接失败");
     }
-    
+
     // unique_ptr 会自动释放内存，无需手动 delete
 }
 ```
@@ -210,31 +210,31 @@ void TestTcp(std::unique_ptr<AtModem>& modem) {
 
     // 创建 TCP 客户端
     auto tcp = modem->CreateTcp(0);
-    
+
     // 设置数据接收回调
     tcp->OnStream([](const std::string& data) {
         ESP_LOGI(TAG, "TCP 接收数据: %s", data.c_str());
     });
-    
+
     // 设置断开连接回调
     tcp->OnDisconnected([]() {
         ESP_LOGI(TAG, "TCP 连接已断开");
     });
-    
+
     if (tcp->Connect("httpbin.org", 80)) {
         // 发送 HTTP 请求
         std::string request = "GET /ip HTTP/1.1\r\nHost: httpbin.org\r\nConnection: close\r\n\r\n";
         int sent = tcp->Send(request);
         ESP_LOGI(TAG, "TCP 发送了 %d 字节", sent);
-        
+
         // 等待接收响应（通过回调处理）
         vTaskDelay(pdMS_TO_TICKS(3000));
-        
+
         tcp->Disconnect();
     } else {
         ESP_LOGE(TAG, "TCP 连接失败");
     }
-    
+
     // unique_ptr 会自动释放内存，无需手动 delete
 }
 ```
@@ -247,27 +247,27 @@ void TestUdp(std::unique_ptr<AtModem>& modem) {
 
     // 创建 UDP 客户端
     auto udp = modem->CreateUdp(0);
-    
+
     // 设置数据接收回调
     udp->OnMessage([](const std::string& data) {
         ESP_LOGI(TAG, "UDP 接收数据: %s", data.c_str());
     });
-    
+
     // 连接到 UDP 服务器
     if (udp->Connect("8.8.8.8", 53)) {
         // 发送简单的测试数据
         std::string test_data = "Hello UDP Server!";
         int sent = udp->Send(test_data);
         ESP_LOGI(TAG, "UDP 发送了 %d 字节", sent);
-        
+
         // 等待接收响应（通过回调处理）
         vTaskDelay(pdMS_TO_TICKS(2000));
-        
+
         udp->Disconnect();
     } else {
         ESP_LOGE(TAG, "UDP 连接失败");
     }
-    
+
     // unique_ptr 会自动释放内存，无需手动 delete
 }
 ```
@@ -280,13 +280,13 @@ void TestUdp(std::unique_ptr<AtModem>& modem) {
 void DirectAtCommand(std::unique_ptr<AtModem>& modem) {
     // 获取共享的 AtUart 实例
     auto uart = modem->GetAtUart();
-    
+
     // 发送自定义 AT 命令
     if (uart->SendCommand("AT+CSQ", 1000)) {
         std::string response = uart->GetResponse();
         ESP_LOGI(TAG, "信号强度查询结果: %s", response.c_str());
     }
-    
+
     // 可以在多个地方安全地持有 uart 引用
     std::shared_ptr<AtUart> my_uart = modem->GetAtUart();
     // my_uart 可以在其他线程或对象中安全使用
@@ -302,14 +302,14 @@ void MonitorNetwork(std::unique_ptr<AtModem>& modem) {
         if (ready) {
             ESP_LOGI(TAG, "网络已就绪");
             ESP_LOGI(TAG, "信号强度: %d", modem->GetCsq());
-            
+
             auto reg_state = modem->GetRegistrationState();
             ESP_LOGI(TAG, "注册状态: %s", reg_state.ToString().c_str());
         } else {
             ESP_LOGE(TAG, "网络连接丢失");
         }
     });
-    
+
     // 检查网络状态
     if (modem->network_ready()) {
         ESP_LOGI(TAG, "当前网络状态: 已连接");
@@ -325,18 +325,18 @@ void MonitorNetwork(std::unique_ptr<AtModem>& modem) {
 void EarlyReleaseExample(std::unique_ptr<AtModem>& modem) {
     // 创建 HTTP 客户端
     auto http = modem->CreateHttp(0);
-    
+
     // 使用完毕后提前释放
     http->Close();
     http.reset(); // 显式释放内存
-    
+
     // 或者让 unique_ptr 在作用域结束时自动释放
     {
         auto tcp = modem->CreateTcp(0);
         tcp->Connect("example.com", 80);
         // 作用域结束时 tcp 自动释放
     }
-    
+
     // 此时 tcp 已经自动释放，可以创建新的连接
     auto udp = modem->CreateUdp(0);
     // ...
@@ -349,7 +349,7 @@ void EarlyReleaseExample(std::unique_ptr<AtModem>& modem) {
 void HandleErrors(std::unique_ptr<AtModem>& modem) {
     // 等待网络就绪，处理各种错误情况
     NetworkStatus status = modem->WaitForNetworkReady(30000);
-    
+
     switch (status) {
         case NetworkStatus::Ready:
             ESP_LOGI(TAG, "网络连接成功");

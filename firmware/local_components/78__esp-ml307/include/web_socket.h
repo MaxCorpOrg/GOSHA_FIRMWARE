@@ -48,7 +48,7 @@ private:
 
     // Mutex for sending data and replying pong
     std::mutex send_mutex_;
-    
+
     EventGroupHandle_t handshake_event_group_;
     static const EventBits_t HANDSHAKE_SUCCESS_BIT = BIT0;
     static const EventBits_t HANDSHAKE_FAILED_BIT = BIT1;

@@ -111,7 +111,7 @@ void Ec801ETcp::Disconnect() {
     if (!instance_active_) {
         return;
     }
-    
+
     if (at_uart_->SendCommand("AT+QICLOSE=" + std::to_string(tcp_id_))) {
         instance_active_ = false;
     }
@@ -135,15 +135,15 @@ int Ec801ETcp::Send(const std::string& data) {
 
     while (total_sent < data.size()) {
         size_t chunk_size = std::min(data.size() - total_sent, MAX_PACKET_SIZE);
-        
+
         std::string command = "AT+QISEND=" + std::to_string(tcp_id_) + "," + std::to_string(chunk_size);
-        
+
         if (!at_uart_->SendCommandWithData(command, 1000, true, data.data() + total_sent, chunk_size)) {
             ESP_LOGE(TAG, "Send command failed");
             Disconnect();
             return -1;
         }
-        
+
         auto bits = xEventGroupWaitBits(event_group_handle_, EC801E_TCP_SEND_COMPLETE | EC801E_TCP_SEND_FAILED, pdTRUE, pdFALSE, pdMS_TO_TICKS(TCP_CONNECT_TIMEOUT_MS));
         if (bits & EC801E_TCP_SEND_FAILED) {
             ESP_LOGE(TAG, "Send failed, retry later");
@@ -153,7 +153,7 @@ int Ec801ETcp::Send(const std::string& data) {
             ESP_LOGE(TAG, "Send timeout");
             return -1;
         }
-        
+
         total_sent += chunk_size;
     }
     return data.size();

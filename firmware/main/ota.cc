@@ -186,25 +186,33 @@ esp_err_t Ota::CheckVersion() {
     }
 
     cJSON* runtime_events = cJSON_GetObjectItem(root, "runtime_events");
-    if (cJSON_IsObject(runtime_events)) {
+    {
         Settings settings("runtime_events", true);
-        cJSON* url = cJSON_GetObjectItem(runtime_events, "url");
-        cJSON* token = cJSON_GetObjectItem(runtime_events, "token");
-        cJSON* schema = cJSON_GetObjectItem(runtime_events, "schema_version");
-        cJSON* heartbeat = cJSON_GetObjectItem(runtime_events, "heartbeat_interval_seconds");
-        if (cJSON_IsString(url)) {
+        cJSON* url = cJSON_IsObject(runtime_events) ? cJSON_GetObjectItem(runtime_events, "url") : nullptr;
+        cJSON* token = cJSON_IsObject(runtime_events) ? cJSON_GetObjectItem(runtime_events, "token") : nullptr;
+        cJSON* schema = cJSON_IsObject(runtime_events) ? cJSON_GetObjectItem(runtime_events, "schema_version") : nullptr;
+        cJSON* heartbeat = cJSON_IsObject(runtime_events) ? cJSON_GetObjectItem(runtime_events, "heartbeat_interval_seconds") : nullptr;
+        const bool has_complete_runtime_events =
+            cJSON_IsString(url) && url->valuestring != nullptr && url->valuestring[0] != '\0' &&
+            cJSON_IsString(token) && token->valuestring != nullptr && token->valuestring[0] != '\0';
+        if (has_complete_runtime_events) {
             settings.SetString("url", url->valuestring);
-        }
-        if (cJSON_IsString(token)) {
             settings.SetString("token", token->valuestring);
+            if (cJSON_IsString(schema)) {
+                settings.SetString("schema", schema->valuestring);
+            } else {
+                settings.EraseKey("schema");
+            }
+            if (cJSON_IsNumber(heartbeat)) {
+                settings.SetInt("heartbeat_sec", std::max(10, heartbeat->valueint));
+            } else {
+                settings.SetInt("heartbeat_sec", 30);
+            }
+            ESP_LOGI(TAG, "Runtime event delivery configured");
+        } else {
+            settings.EraseAll();
+            ESP_LOGI(TAG, "Runtime event delivery disabled by OTA/config");
         }
-        if (cJSON_IsString(schema)) {
-            settings.SetString("schema", schema->valuestring);
-        }
-        if (cJSON_IsNumber(heartbeat)) {
-            settings.SetInt("heartbeat_sec", std::max(10, heartbeat->valueint));
-        }
-        ESP_LOGI(TAG, "Runtime event delivery configured");
     }
 
     has_server_time_ = false;

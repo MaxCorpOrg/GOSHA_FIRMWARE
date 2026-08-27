@@ -114,7 +114,7 @@ void Ec801ESsl::Disconnect() {
     if (!instance_active_) {
         return;
     }
-    
+
     at_uart_->SendCommand("AT+QSSLCLOSE=" + std::to_string(ssl_id_));
 
     if (connected_) {
@@ -136,9 +136,9 @@ int Ec801ESsl::Send(const std::string& data) {
 
     while (total_sent < data.size()) {
         size_t chunk_size = std::min(data.size() - total_sent, MAX_PACKET_SIZE);
-        
+
         std::string command = "AT+QSSLSEND=" + std::to_string(ssl_id_) + "," + std::to_string(chunk_size);
-        
+
         if (!at_uart_->SendCommandWithData(command, 1000, true, data.data() + total_sent, chunk_size)) {
             ESP_LOGE(TAG, "Send command failed");
             Disconnect();
@@ -154,7 +154,7 @@ int Ec801ESsl::Send(const std::string& data) {
             ESP_LOGE(TAG, "Send timeout");
             return -1;
         }
-        
+
         total_sent += chunk_size;
     }
     return data.size();

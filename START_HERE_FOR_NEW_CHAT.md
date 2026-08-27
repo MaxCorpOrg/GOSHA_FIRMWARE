@@ -4,6 +4,10 @@
 
 ## Самая свежая аппаратная точка
 
+- `2026-08-27` в `feature/firmware-orange-eyes` подготовлен статический firmware gate без касания робота: flash, USB, serial, live `:8080`, motion, `Home`, `set_trim` и servo sequence не запускались.
+- Старые blockers gate закрыты в коде и сборке: `CONFIG_OTA_URL` больше не хранит hardcoded endpoint по умолчанию; `self.otto.stop` больше не вызывает `Home`; `runtime_events` fail-closed очищает неполную NVS-конфигурацию и не ретраит события без полного `url/token`; локальный `WebSocket` не печатает полный входящий payload; vendored whitespace в `78__esp-ml307` вычищен.
+- Каноническая сборка `python3 scripts/release.py gosha-v1 --name gosha-v1` прошла. SHA-256: `firmware/build/gosha.bin` — `a4925250271131899bbf0d7f9c50f48bd1b04d780a4f67796511f7c4f2ba9ea7`; `firmware/build/merged-binary.bin` — `7c7ad7c3837289e27b2daa7f881c91eec6801e27a0ddacc8fd6d90c828f42730`; `firmware/releases/v2.2.2_gosha-v1.zip` — `6acd711c115fddca7d556ce9bf965f5e82a4569e6aaa01779b88d4272c2ec0ec`. `merged-binary.bin` внутри ZIP совпадает с текущим build по SHA-256.
+- Проверки `git diff --check`, `git diff --check origin/main` и поиск numeric public endpoint в `firmware/main`, `docs`, `START_HERE_FOR_NEW_CHAT.md` прошли. Установка на физический робот остаётся `NO-GO` до отдельного terminal review и замены/безопасной механической приёмки левой сервы.
 - `2026-08-25` временный сетевой канал принят как рабочий обход: `TEMP_NL_RELAY` временно прокидывает роботу путь к `PRIMARY_PLATFORM_SERVER`, а не заменяет основной сервер.
 - Роли портов фиксируются логическими именами без IP-адресов, секретов и хардкода в прошивке: `18876` — HTTP-контур панели, OTA и config; `18080` — голосовой `WebSocket` и совместимый `MCP`.
 - В конце месяца канал нужно перенести с `TEMP_NL_RELAY` на `FUTURE_PRODUCTION_SERVER`, после чего повторить короткую сетевую проверку.

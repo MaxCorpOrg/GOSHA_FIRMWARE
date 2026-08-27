@@ -15,11 +15,11 @@ public:
     virtual void OnStream(std::function<void(const std::string& data)> callback) {
         stream_callback_ = callback;
     }
-    
+
     virtual void OnDisconnected(std::function<void()> callback) {
         disconnect_callback_ = callback;
     }
-    
+
     // 连接状态查询
     bool connected() const { return connected_; }
 
@@ -29,7 +29,7 @@ public:
 protected:
     std::function<void(const std::string& data)> stream_callback_;
     std::function<void()> disconnect_callback_;
-    
+
     // 连接状态管理
     bool connected_ = false;         // 是否可以正常读写数据
 };

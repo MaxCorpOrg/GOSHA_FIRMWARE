@@ -46,7 +46,7 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
                             eof_ = arguments[3].int_value >= arguments[2].int_value;
                         }
                     }
-                    
+
                     body_offset_ += arguments[4].int_value;
                     if (arguments[3].int_value > body_offset_) {
                         ESP_LOGE(TAG, "body_offset_: %u, arguments[3].int_value: %d", body_offset_, arguments[3].int_value);
@@ -76,30 +76,30 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
 
 int Ml307Http::Read(char* buffer, size_t buffer_size) {
     std::unique_lock<std::mutex> lock(mutex_);
-    
+
     if (eof_ && body_.empty()) {
         return 0;
     }
-    
+
     // 使用条件变量等待数据
     auto timeout = std::chrono::milliseconds(timeout_ms_);
-    bool received = cv_.wait_for(lock, timeout, [this] { 
-        return !body_.empty() || eof_; 
+    bool received = cv_.wait_for(lock, timeout, [this] {
+        return !body_.empty() || eof_;
     });
-    
+
     if (!received) {
-        ESP_LOGE(TAG, "Timeout waiting for HTTP content to be received, body_offset: %u, eof: %d", 
+        ESP_LOGE(TAG, "Timeout waiting for HTTP content to be received, body_offset: %u, eof: %d",
                  body_offset_, eof_);
         return -1;
     }
     if (!instance_active_) {
         return -1;
     }
-    
+
     size_t bytes_to_read = std::min(body_.size(), buffer_size);
     std::memcpy(buffer, body_.data(), bytes_to_read);
     body_.erase(0, bytes_to_read);
-    
+
     return bytes_to_read;
 }
 
@@ -159,13 +159,13 @@ void Ml307Http::ParseResponseHeaders(const std::string& headers) {
         std::string key, value;
         std::getline(line_iss, key, ':');
         std::getline(line_iss, value);
-    
+
         // 去除前后空格
         key.erase(0, key.find_first_not_of(" \t"));
         key.erase(key.find_last_not_of(" \t") + 1);
         value.erase(0, value.find_first_not_of(" \t"));
         value.erase(value.find_last_not_of(" \t\r\n") + 1);
-        
+
         response_headers_[key] = value;
 
         // 检查是否为chunked传输编码
@@ -179,10 +179,10 @@ void Ml307Http::ParseResponseHeaders(const std::string& headers) {
 bool Ml307Http::Open(const std::string& method, const std::string& url) {
     method_ = method;
     url_ = url;
-    
+
     // 判断是否为需要发送内容的HTTP方法
     bool method_supports_content = (method_ == "POST" || method_ == "PUT");
-    
+
     // 解析URL
     size_t protocol_end = url.find("://");
     if (protocol_end != std::string::npos) {
@@ -321,12 +321,12 @@ size_t Ml307Http::GetBodyLength() {
 
 std::string Ml307Http::ReadAll() {
     std::unique_lock<std::mutex> lock(mutex_);
-    
+
     auto timeout = std::chrono::milliseconds(timeout_ms_);
-    bool received = cv_.wait_for(lock, timeout, [this] { 
-        return eof_; 
+    bool received = cv_.wait_for(lock, timeout, [this] {
+        return eof_;
     });
-    
+
     if (!received) {
         ESP_LOGE(TAG, "Timeout waiting for HTTP content to be received");
         return body_;

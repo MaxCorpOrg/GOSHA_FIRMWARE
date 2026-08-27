@@ -148,7 +148,7 @@ esp_err_t WebSocketControlServer::ws_handler(httpd_req_t *req) {
             free(buf);
             return ret;
         }
-        ESP_LOGI(TAG, "Got packet with message: %s", ws_pkt.payload);
+        ESP_LOGI(TAG, "Got WebSocket text packet, len=%d", ws_pkt.len);
     }
     
     ESP_LOGI(TAG, "Packet type: %d", ws_pkt.type);
