@@ -708,7 +708,7 @@ hands_up, hands_down, hand_wave, windmill, takeoff, fitness, greeting, shy, radi
             });
 
 
-        mcp_server.AddTool("self.otto.stop", "Немедленно останавливает текущие действия без возврата робота в нейтральное положение", PropertyList(),
+        mcp_server.AddTool("self.otto.stop", "Немедленно останавливает действия без запуска Home или другого нового движения", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
                                if (action_task_handle_ != nullptr) {
                                    vTaskDelete(action_task_handle_);
@@ -717,6 +717,7 @@ hands_up, hands_down, hand_wave, windmill, takeoff, fitness, greeting, shy, radi
                                is_action_in_progress_ = false;
                                PowerManager::ResumeBatteryUpdate();  // 停止动作时恢复电量更新
                                xQueueReset(action_queue_);
+
                                return "Действия остановлены без команды Home";
                            });
 

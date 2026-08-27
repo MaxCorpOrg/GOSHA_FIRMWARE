@@ -85,7 +85,9 @@ namespace audio_wifi_config
                     if (newline_position != std::string::npos) {
                         wifi_ssid = data_buffer.decoded_text->substr(0, newline_position);
                         wifi_password = data_buffer.decoded_text->substr(newline_position + 1);
-                        ESP_LOGI(kLogTag, "WiFi SSID: %s, Password: %s", wifi_ssid.c_str(), wifi_password.c_str());
+                        ESP_LOGI(kLogTag, "WiFi credentials decoded (SSID length=%u, password length=%u)",
+                                 static_cast<unsigned>(wifi_ssid.size()),
+                                 static_cast<unsigned>(wifi_password.size()));
                     } else {
                         ESP_LOGE(kLogTag, "Invalid data format, no newline character found");
                         continue;

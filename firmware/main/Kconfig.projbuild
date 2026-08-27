@@ -1,12 +1,13 @@
 menu "GOSHA Firmware"
 
 config OTA_URL
-    string "Fallback OTA URL"
+    string "Default OTA URL"
     default ""
     help
-        Optional fallback URL used only when the runtime wifi/ota_url setting is absent.
-        Production GOSHA builds must provide the OTA/config endpoint through owner-only
-        runtime configuration instead of hardcoding a public relay or server address.
+        Optional owner-supplied fallback used to check for firmware updates and
+        server configuration. Keep it empty in version control and inject the
+        deployment endpoint at build time or through the "wifi/ota_url" runtime
+        setting. Temporary relay addresses must never be compiled into firmware.
 
 choice
     prompt "Flash Assets"

@@ -2,18 +2,10 @@
 
 ## Самая свежая точка 2026-08-27
 
-- В `feature/firmware-orange-eyes` подготовлен статический firmware gate без живого касания робота: не выполнялись flash, USB/serial-проверки, перезагрузка, live raw `:8080`, motion, `Home`, `set_trim` и servo sequence.
-- Старые причины `NO-GO` закрыты статически:
-  - `CONFIG_OTA_URL` больше не содержит hardcoded public endpoint по умолчанию; OTA/config endpoint должен приходить из runtime/NVS-конфигурации владельца;
-  - `self.otto.stop` больше не ставит `ACTION_HOME` и не возвращает робота в нейтральное положение движением;
-  - `runtime_events` включается только при полном `url/token`, неполная конфигурация очищает NVS и работает fail-closed;
-  - отправитель runtime-событий не уходит в бесконечные повторы, если доставка выключена;
-  - локальный `WebSocket` не печатает полный входящий payload;
-  - хвостовые пробелы в vendored-компоненте `firmware/local_components/78__esp-ml307` вычищены.
-- Каноническая сборка `python3 scripts/release.py gosha-v1 --name gosha-v1` прошла. Размер `gosha.bin` — `0x37b9d0`, свободно `0x74630` байт, 12% раздела.
-- SHA-256: `firmware/build/gosha.bin` — `a4925250271131899bbf0d7f9c50f48bd1b04d780a4f67796511f7c4f2ba9ea7`; `firmware/build/merged-binary.bin` — `7c7ad7c3837289e27b2daa7f881c91eec6801e27a0ddacc8fd6d90c828f42730`; `firmware/releases/v2.2.2_gosha-v1.zip` — `6acd711c115fddca7d556ce9bf965f5e82a4569e6aaa01779b88d4272c2ec0ec`.
-- `merged-binary.bin` внутри ZIP совпадает с текущим `firmware/build/merged-binary.bin` по SHA-256. `git diff --check` и `git diff --check origin/main` прошли; hardcoded numeric public endpoint в `firmware/main`, `docs`, `START_HERE_FOR_NEW_CHAT.md` не найден.
-- Физическая установка и merge остаются `NO-GO` до terminal read-only review и замены/безопасной механической приёмки левой сервы.
+- В отдельной чистой ветке подготовлена статическая remediation-правка опубликованного `feature/firmware-orange-eyes @ 8ac1e3f`: OTA-default больше не содержит временный relay, production-сборка требует owner-only `GOSHA_OTA_URL`, чувствительные Wi-Fi/activation/Authorization-логи удалены, неполная `runtime_events` конфигурация очищает старый маршрут и token, `self.otto.stop` не запускает `Home`, а `git diff --check origin/main` чист.
+- Полная сборка ESP-IDF 5.5.2 с тестовым `.invalid` endpoint прошла без доступа к устройству: `gosha.bin` — `3652256` байт, 12% app-раздела свободно. Полученный ZIP не является deployable-артефактом.
+- Upstream symlink `_codeql_detected_source_root`, который блокировал защищённую упаковку workspace AI Office, удалён как неиспользуемый служебный marker.
+- Следующий шаг — commit/push remediation-ветки и immutable terminal review GPT-5.5/xhigh через AI Office. До его `PASS`, а также до замены левой сервы, merge, flash, USB/serial, motion и trim запрещены.
 
 ## Предыдущая точка 2026-08-25
 

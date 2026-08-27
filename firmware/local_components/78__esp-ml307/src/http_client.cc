@@ -157,7 +157,7 @@ std::string HttpClient::BuildHttpRequest() {
 
     // 结束头部
     request << "\r\n";
-    ESP_LOGD(TAG, "HTTP request headers:\n%s", request.str().c_str());
+    ESP_LOGD(TAG, "HTTP request headers prepared");
 
     // 请求体
     if (has_content) {

@@ -1,15 +1,14 @@
 # PROJECT STATUS
 
-## Контрольная точка firmware gate 2026-08-27
+## Статический firmware remediation-gate 2026-08-27
 
-- Активная ветка: `feature/firmware-orange-eyes`. Работа выполнена как неподвижный firmware gate: робот физически не прошивался, не перезагружался, не проверялся через live raw `:8080`, и не запускались `motion`, `Home`, `set_trim` или servo sequence.
-- Закрыты статические причины предыдущего `NO-GO`: удалён hardcoded fallback OTA/config endpoint, `self.otto.stop` больше не инициирует `Home`, stale или неполная `runtime_events`-конфигурация очищается fail-closed, runtime reporter не ретраит выключенную доставку бесконечно, входящий локальный `WebSocket` payload не печатается в журнал, vendored `78__esp-ml307` проходит whitespace check.
-- Каноническая сборка `python3 scripts/release.py gosha-v1 --name gosha-v1` завершилась успешно. `gosha.bin` занимает `0x37b9d0` байт, свободно `0x74630` байт, 12% раздела.
-- SHA-256 `firmware/build/gosha.bin`: `a4925250271131899bbf0d7f9c50f48bd1b04d780a4f67796511f7c4f2ba9ea7`.
-- SHA-256 `firmware/build/merged-binary.bin`: `7c7ad7c3837289e27b2daa7f881c91eec6801e27a0ddacc8fd6d90c828f42730`.
-- SHA-256 `firmware/releases/v2.2.2_gosha-v1.zip`: `6acd711c115fddca7d556ce9bf965f5e82a4569e6aaa01779b88d4272c2ec0ec`.
-- `merged-binary.bin` внутри release ZIP совпадает с текущим build по SHA-256. `git diff --check` и `git diff --check origin/main` проходят; numeric public endpoint в `firmware/main`, `docs`, `START_HERE_FOR_NEW_CHAT.md` не найден.
-- Физическая установка и merge остаются `NO-GO` до terminal read-only review и замены/безопасной механической приёмки неисправной левой сервы.
+- База remediation — опубликованный `feature/firmware-orange-eyes @ 8ac1e3f`. Исходный аудит GPT-5.5/xhigh вернул `NO-GO`: сетевой адрес временного relay находился в OTA-default и README, vendored `78__esp-ml307` не проходил `git diff --check`, а runtime-логи раскрывали Wi-Fi-пароль и activation payload.
+- OTA/config endpoint вынесен в обязательную owner-only переменную `GOSHA_OTA_URL`. Скрипт сборки валидирует абсолютный HTTP(S)-URL, запрещает встроенные учётные данные и не печатает значение. `TEMP_NL_RELAY` не является допустимым production-default.
+- Пустой endpoint обрабатывается fail-fast, без экспоненциального цикла повторов. `self.otto.stop` теперь останавливает текущую задачу без постановки `ACTION_HOME`.
+- Чувствительные Wi-Fi/activation-логи обезличены; HTTP-клиент не печатает `Authorization`. `runtime_events` применяется replace-whole и очищает старый endpoint/token при отсутствии полной секции. Vendored whitespace очищен, `git diff --check origin/main` проходит.
+- Неиспользуемый upstream symlink `_codeql_detected_source_root` удалён, поскольку secure workspace-export AI Office отклоняет symlink как `unsupported_git_entry` до запуска модели.
+- Каноническая сборка ESP-IDF 5.5.2 с неразрешимым тестовым `.invalid` endpoint прошла без flash: `gosha.bin` — `3652256` байт, свободно 12% app-раздела. Собранный ZIP — только статическое доказательство компиляции, устанавливать его нельзя.
+- До commit/push и immutable terminal `PASS` GPT-5.5/xhigh через AI Office merge остаётся `NO-GO`. Неисправная левая серва отдельно сохраняет запрет на flash, USB/serial, motion и trim.
 
 ## Контрольная точка нового робота 2026-08-25
 
@@ -248,7 +247,7 @@
 - Новый образ с порогом `38` уже канонически собран через `scripts/release.py`, прошит на устройство и подтверждён по живому boot log:
   - `set det threshold to 0.380000`
   - это важно, потому что обычный `idf.py build` сам по себе не подтягивает `sdkconfig_append` из `boards/gosha-v1/config.json`
-  - для таких профильных параметров каноническим способом сборки остаётся `python3 scripts/release.py gosha-v1 --name gosha-v1`
+  - для новых production-сборок профильных параметров канонический способ — `GOSHA_OTA_URL='<owner-only production endpoint>' python3 scripts/release.py gosha-v1 --name gosha-v1`; исторический образ был собран до введения обязательной owner-конфигурации
 - Собран и прошит новый образ с собственным словом пробуждения.
 - На реальном устройстве подтверждён полный живой цикл:
   - устройство вышло в домашний `Wi‑Fi`

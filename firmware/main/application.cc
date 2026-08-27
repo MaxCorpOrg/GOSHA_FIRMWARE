@@ -448,6 +448,10 @@ void Application::CheckNewVersion() {
 
         esp_err_t err = ota_->CheckVersion();
         if (err != ESP_OK) {
+            if (err == ESP_ERR_INVALID_ARG && ota_->GetCheckVersionUrl().empty()) {
+                ESP_LOGE(TAG, "OTA/config endpoint is not configured; skipping version check");
+                return;
+            }
             retry_count++;
             if (retry_count >= MAX_RETRY) {
                 ESP_LOGE(TAG, "Too many retries, exit version check");
@@ -455,8 +459,8 @@ void Application::CheckNewVersion() {
             }
 
             char error_message[128];
-            snprintf(error_message, sizeof(error_message), "code=%d, ota_url_configured=%s",
-                     err, ota_->GetCheckVersionUrl().empty() ? "no" : "yes");
+            snprintf(error_message, sizeof(error_message), "code=%d, ota_url_configured=%s", err,
+                     ota_->GetCheckVersionUrl().empty() ? "no" : "yes");
             char buffer[256];
             snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, error_message);
             Alert(Lang::Strings::ERROR, buffer, "cloud_slash", Lang::Sounds::OGG_EXCLAMATION);

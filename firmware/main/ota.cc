@@ -191,27 +191,31 @@ esp_err_t Ota::CheckVersion() {
         cJSON* url = cJSON_IsObject(runtime_events) ? cJSON_GetObjectItem(runtime_events, "url") : nullptr;
         cJSON* token = cJSON_IsObject(runtime_events) ? cJSON_GetObjectItem(runtime_events, "token") : nullptr;
         cJSON* schema = cJSON_IsObject(runtime_events) ? cJSON_GetObjectItem(runtime_events, "schema_version") : nullptr;
-        cJSON* heartbeat = cJSON_IsObject(runtime_events) ? cJSON_GetObjectItem(runtime_events, "heartbeat_interval_seconds") : nullptr;
-        const bool has_complete_runtime_events =
-            cJSON_IsString(url) && url->valuestring != nullptr && url->valuestring[0] != '\0' &&
-            cJSON_IsString(token) && token->valuestring != nullptr && token->valuestring[0] != '\0';
-        if (has_complete_runtime_events) {
+        cJSON* heartbeat = cJSON_IsObject(runtime_events)
+            ? cJSON_GetObjectItem(runtime_events, "heartbeat_interval_seconds")
+            : nullptr;
+
+        const bool has_delivery_config =
+            cJSON_IsObject(runtime_events) && cJSON_IsString(url) && url->valuestring != nullptr &&
+            url->valuestring[0] != '\0' && cJSON_IsString(token) && token->valuestring != nullptr &&
+            token->valuestring[0] != '\0';
+
+        // The server section is replace-whole. Clear stale routing and tokens
+        // before applying a complete replacement, or disable delivery when the
+        // section is absent/incomplete.
+        settings.EraseAll();
+        if (has_delivery_config) {
             settings.SetString("url", url->valuestring);
             settings.SetString("token", token->valuestring);
             if (cJSON_IsString(schema)) {
                 settings.SetString("schema", schema->valuestring);
-            } else {
-                settings.EraseKey("schema");
             }
             if (cJSON_IsNumber(heartbeat)) {
                 settings.SetInt("heartbeat_sec", std::max(10, heartbeat->valueint));
-            } else {
-                settings.SetInt("heartbeat_sec", 30);
             }
             ESP_LOGI(TAG, "Runtime event delivery configured");
         } else {
-            settings.EraseAll();
-            ESP_LOGI(TAG, "Runtime event delivery disabled by OTA/config");
+            ESP_LOGI(TAG, "Runtime event delivery disabled");
         }
     }
 
@@ -481,7 +485,7 @@ std::string Ota::GetActivationPayload() {
     cJSON_free(json_str);
     cJSON_Delete(payload);
 
-    ESP_LOGI(TAG, "Activation payload: %s", json.c_str());
+    ESP_LOGI(TAG, "Activation payload prepared");
     return json;
 }
 
