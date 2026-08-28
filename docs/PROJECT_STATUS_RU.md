@@ -1,5 +1,14 @@
 # PROJECT STATUS
 
+## Локальный hardening URL/AFSK 2026-08-28
+
+- Ветка `codex/firmware-log-hardening-20260828` от `28eb7584aaeef0cb66aa3c967bf4a162f49b3d0b` закрывает дополнительную статическую защиту диагностических сообщений. Сетевые адреса продолжают использоваться в коде для подключения, но в логи, экранные сообщения и ошибки теперь отдаётся только обезличенное описание URL: схема и список скрытых частей без значений `userinfo`, host/IP, port, path, query, fragment и token.
+- Добавлен общий helper `firmware/main/diagnostic_redaction.*` и static guard `firmware/scripts/check_sensitive_logging.py`. Guard — это локальная статическая проверка исходников: она не запускает устройство, а ищет опасные места, где полный URL, activation body или Wi-Fi payload могли бы попасть в диагностику.
+- AFSK-настройка `Wi-Fi` больше не печатает и не показывает полный decoded text с SSID/password. В журнале остаются только длины SSID/password как безопасная диагностика, а на экране остаётся понятное сообщение о получении данных.
+- Статические доказательства до commit: host test `diagnostic_redaction_host_test.cc` прошёл; `./scripts/check_sensitive_logging.py` прошёл; `git diff --check` прошёл; каноническая сборка `GOSHA_OTA_URL='<owner-only production endpoint>' python3 scripts/release.py gosha-v1 --name gosha-v1` прошла, значение endpoint не печаталось и не сохранялось.
+- Размеры итоговой статической сборки: `build/gosha.bin` — `3654368` байт; `build/merged-binary.bin` — `13790351` байт; `releases/v2.2.2_gosha-v1.zip` — `6390834` байт. SHA-256: `gosha.bin` — `94473bb2864e73c0897bf7b5116941508641089691de4f60baef826fbbe245cb`; `merged-binary.bin` — `0b43aa4d988427bafbec366b7b666984c8bdaf9b408946a19496994f33ab0187`; ZIP — `9084ec24e10e61fe096ae303a8c4f65315d80f8553581484eb3986b5c1e072fb`.
+- Артефакты этой проверки являются только статическим доказательством сборки. Устанавливать их на устройство нельзя без отдельного аппаратного допуска. Из-за неисправной левой сервы по-прежнему запрещены USB/serial, flash, перезагрузка ради теста, motion, `trim`, servo sequence и raw `:8080`.
+
 ## Статический firmware remediation-gate 2026-08-27
 
 - База remediation — опубликованный `feature/firmware-orange-eyes @ 8ac1e3f`; итоговый кандидат опубликован в Draft PR `#24` на `7751a3ca326174d217536f6a8de7c09433c3e955`. Исходный аудит GPT-5.5/xhigh вернул `NO-GO`: сетевой адрес временного relay находился в OTA-default и README, vendored `78__esp-ml307` не проходил `git diff --check`, а runtime-логи раскрывали Wi-Fi-пароль и activation payload.

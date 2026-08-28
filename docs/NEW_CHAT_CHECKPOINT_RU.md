@@ -1,5 +1,12 @@
 # NEW CHAT CHECKPOINT
 
+## Локальная точка 2026-08-28
+
+- Ветка `codex/firmware-log-hardening-20260828` от `28eb7584aaeef0cb66aa3c967bf4a162f49b3d0b` добавляет защиту URL/AFSK-диагностики: в логи, экранные сообщения и ошибки не должны попадать `userinfo`, host/IP, port, path, query, fragment, token и полный SSID/password text.
+- Добавлен `diagnostic_redaction::RedactUrlForDiagnostics` и исполняемый static guard `firmware/scripts/check_sensitive_logging.py`. Host test, static guard, `git diff --check` и каноническая сборка `gosha-v1` прошли без устройства.
+- Статическая сборка дала `gosha.bin` размером `3654368` байт, свободно 11% app-раздела; это только доказательство компиляции, не образ для установки.
+- До замены левой сервы и отдельного аппаратного допуска по-прежнему запрещены USB/serial, flash, перезагрузка ради теста, motion, `trim`, servo sequence и raw `:8080`.
+
 ## Самая свежая точка 2026-08-27
 
 - В Draft PR `#24` опубликована статическая remediation-правка `feature/firmware-orange-eyes @ 7751a3ca326174d217536f6a8de7c09433c3e955`: OTA-default больше не содержит временный relay, production-сборка требует owner-only `GOSHA_OTA_URL`, чувствительные Wi-Fi/activation/Authorization-логи удалены, неполная `runtime_events` конфигурация очищает старый маршрут и token, `self.otto.stop` не запускает `Home`, а `git diff --check origin/main` чист.

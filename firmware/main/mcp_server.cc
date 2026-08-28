@@ -17,6 +17,7 @@
 #include "settings.h"
 #include "lvgl_theme.h"
 #include "lvgl_display.h"
+#include "diagnostic_redaction.h"
 
 #define TAG "MCP"
 
@@ -155,7 +156,8 @@ void McpServer::AddUserOnlyTools() {
         }),
         [this](const PropertyList& properties) -> ReturnValue {
             auto url = properties["url"].value<std::string>();
-            ESP_LOGI(TAG, "User requested firmware upgrade from URL: %s", url.c_str());
+            const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(url);
+            ESP_LOGI(TAG, "User requested firmware upgrade from %s", diagnostic_url.c_str());
             
             auto& app = Application::GetInstance();
             app.Schedule([url, &app]() {
@@ -201,7 +203,8 @@ void McpServer::AddUserOnlyTools() {
                     throw std::runtime_error("Failed to snapshot screen");
                 }
 
-                ESP_LOGI(TAG, "Upload snapshot %u bytes to %s", jpeg_data.size(), url.c_str());
+                const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(url);
+                ESP_LOGI(TAG, "Upload snapshot %u bytes to %s", jpeg_data.size(), diagnostic_url.c_str());
                 
                 // 构造multipart/form-data请求体
                 std::string boundary = "----ESP32_SCREEN_SNAPSHOT_BOUNDARY";
@@ -209,7 +212,7 @@ void McpServer::AddUserOnlyTools() {
                 auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
                 http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
                 if (!http->Open("POST", url)) {
-                    throw std::runtime_error("Failed to open URL: " + url);
+                    throw std::runtime_error("Failed to open URL: " + diagnostic_url);
                 }
                 {
                     // 文件字段头部
@@ -247,10 +250,11 @@ void McpServer::AddUserOnlyTools() {
             }),
             [display](const PropertyList& properties) -> ReturnValue {
                 auto url = properties["url"].value<std::string>();
+                const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(url);
                 auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
 
                 if (!http->Open("GET", url)) {
-                    throw std::runtime_error("Failed to open URL: " + url);
+                    throw std::runtime_error("Failed to open URL: " + diagnostic_url);
                 }
                 int status_code = http->GetStatusCode();
                 if (status_code != 200) {
@@ -260,14 +264,14 @@ void McpServer::AddUserOnlyTools() {
                 size_t content_length = http->GetBodyLength();
                 char* data = (char*)heap_caps_malloc(content_length, MALLOC_CAP_8BIT);
                 if (data == nullptr) {
-                    throw std::runtime_error("Failed to allocate memory for image: " + url);
+                    throw std::runtime_error("Failed to allocate memory for image: " + diagnostic_url);
                 }
                 size_t total_read = 0;
                 while (total_read < content_length) {
                     int ret = http->Read(data + total_read, content_length - total_read);
                     if (ret < 0) {
                         heap_caps_free(data);
-                        throw std::runtime_error("Failed to download image: " + url);
+                        throw std::runtime_error("Failed to download image: " + diagnostic_url);
                     }
                     if (ret == 0) {
                         break;

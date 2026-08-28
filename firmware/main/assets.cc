@@ -5,6 +5,7 @@
 #include "lvgl_theme.h"
 #include "emote_display.h"
 #include "expression_emote.h"
+#include "diagnostic_redaction.h"
 #if HAVE_LVGL
 #include "display/lcd_display.h"
 #include <spi_flash_mmap.h>
@@ -424,7 +425,8 @@ bool Assets::EmoteStrategy::Apply(Assets* assets) {
 }
 
 bool Assets::Download(std::string url, std::function<void(int progress, size_t speed)> progress_callback) {
-    ESP_LOGI(TAG, "Downloading new version of assets from %s", url.c_str());
+    const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(url);
+    ESP_LOGI(TAG, "Downloading new version of assets from %s", diagnostic_url.c_str());
 
     // 取消当前资源分区的内存映射
     UnApplyPartition();

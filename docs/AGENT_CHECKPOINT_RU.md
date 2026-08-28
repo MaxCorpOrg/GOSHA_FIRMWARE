@@ -1,5 +1,15 @@
 # AGENT CHECKPOINT
 
+## Локальная контрольная точка hardening 2026-08-28
+
+- Ветка `codex/firmware-log-hardening-20260828` от `28eb7584aaeef0cb66aa3c967bf4a162f49b3d0b` добавляет защиту диагностических URL-логов и AFSK-настройки `Wi-Fi`.
+- Полные URL больше не должны попадать в `application.cc`, `assets.cc`, `ota.cc`, `mcp_server.cc` и `protocols/websocket_protocol.cc` через логи, экранные сообщения или ошибки. В диагностику выводится только обезличенное описание через `diagnostic_redaction::RedactUrlForDiagnostics`.
+- Activation failure больше не печатает тело ответа сервера; ответ дочитывается для корректного закрытия HTTP, но в журнале остаётся только код статуса и пометка, что тело скрыто.
+- AFSK больше не выводит полный decoded text на экран и не печатает SSID/password text. Остаются безопасные длины SSID/password и понятное сообщение о получении данных.
+- Локальные статические проверки прошли без доступа к устройству: host test `diagnostic_redaction_host_test.cc`, `./scripts/check_sensitive_logging.py`, `git diff --check`, каноническая сборка `GOSHA_OTA_URL='<owner-only production endpoint>' python3 scripts/release.py gosha-v1 --name gosha-v1`.
+- Сборочный результат: `gosha.bin` — `3654368` байт, свободно 11% app-раздела; SHA-256 `94473bb2864e73c0897bf7b5116941508641089691de4f60baef826fbbe245cb`. `merged-binary.bin` SHA-256 `0b43aa4d988427bafbec366b7b666984c8bdaf9b408946a19496994f33ab0187`, ZIP SHA-256 `9084ec24e10e61fe096ae303a8c4f65315d80f8553581484eb3986b5c1e072fb`.
+- Это не аппаратный допуск и не release на установку. До замены левой сервы и отдельного допуска остаются запрещены USB/serial, flash, перезагрузка ради теста, motion, `trim`, servo sequence и raw `:8080`.
+
 ## Свежая контрольная точка 2026-08-27
 
 - Статический remediation-gate опубликован в Draft PR `#24` как `feature/firmware-orange-eyes @ 7751a3ca326174d217536f6a8de7c09433c3e955`; исходный аудит GPT-5.5 дал `NO-GO` из-за hardcoded временного relay, хвостовых пробелов в новом vendored-компоненте и чувствительных runtime-логов, а перечисленные блокеры закрыты в опубликованном head.

@@ -10,6 +10,7 @@
 #include "assets.h"
 #include "settings.h"
 #include "runtime_event_reporter.h"
+#include "diagnostic_redaction.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -402,7 +403,8 @@ void Application::CheckAssetsVersion() {
         settings.EraseKey("download_url");
 
         char message[256];
-        snprintf(message, sizeof(message), Lang::Strings::FOUND_NEW_ASSETS, download_url.c_str());
+        const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(download_url);
+        snprintf(message, sizeof(message), Lang::Strings::FOUND_NEW_ASSETS, diagnostic_url.c_str());
         Alert(Lang::Strings::LOADING_ASSETS, message, "cloud_arrow_down", Lang::Sounds::OGG_UPGRADE);
         
         // Wait for the audio service to be idle for 3 seconds
@@ -1022,7 +1024,8 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
         ESP_LOGI(TAG, "Closing audio channel before firmware upgrade");
         protocol_->CloseAudioChannel();
     }
-    ESP_LOGI(TAG, "Starting firmware upgrade from URL: %s", upgrade_url.c_str());
+    const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(upgrade_url);
+    ESP_LOGI(TAG, "Starting firmware upgrade from %s", diagnostic_url.c_str());
 
     Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "download", Lang::Sounds::OGG_UPGRADE);
     vTaskDelay(pdMS_TO_TICKS(3000));
