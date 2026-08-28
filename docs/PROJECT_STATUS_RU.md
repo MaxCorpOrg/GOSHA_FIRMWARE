@@ -8,6 +8,7 @@
 - Статические доказательства до commit: host test `diagnostic_redaction_host_test.cc` прошёл; `./scripts/check_sensitive_logging.py` прошёл; `git diff --check` прошёл; каноническая сборка `GOSHA_OTA_URL='<owner-only production endpoint>' python3 scripts/release.py gosha-v1 --name gosha-v1` прошла, значение endpoint не печаталось и не сохранялось.
 - Размеры итоговой статической сборки: `build/gosha.bin` — `3654368` байт; `build/merged-binary.bin` — `13790351` байт; `releases/v2.2.2_gosha-v1.zip` — `6390834` байт. SHA-256: `gosha.bin` — `94473bb2864e73c0897bf7b5116941508641089691de4f60baef826fbbe245cb`; `merged-binary.bin` — `0b43aa4d988427bafbec366b7b666984c8bdaf9b408946a19496994f33ab0187`; ZIP — `9084ec24e10e61fe096ae303a8c4f65315d80f8553581484eb3986b5c1e072fb`.
 - Артефакты этой проверки являются только статическим доказательством сборки. Устанавливать их на устройство нельзя без отдельного аппаратного допуска. Из-за неисправной левой сервы по-прежнему запрещены USB/serial, flash, перезагрузка ради теста, motion, `trim`, servo sequence и raw `:8080`.
+- Follow-up review wave2 нашёл и закрыл дополнительный NO-GO: `self.screen.snapshot` больше не печатает raw response body после upload. Ответ HTTP всё ещё дочитывается для корректного закрытия соединения, но в журнале остаётся только факт успешной загрузки и пометка, что тело скрыто. Static guard расширен на схему `ReadAll()` плюс последующий `ESP_LOG*`.
 
 ## Статический firmware remediation-gate 2026-08-27
 

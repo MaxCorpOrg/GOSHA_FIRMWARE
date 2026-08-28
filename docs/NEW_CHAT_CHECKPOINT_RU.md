@@ -4,6 +4,7 @@
 
 - Ветка `codex/firmware-log-hardening-20260828` от `28eb7584aaeef0cb66aa3c967bf4a162f49b3d0b` добавляет защиту URL/AFSK-диагностики: в логи, экранные сообщения и ошибки не должны попадать `userinfo`, host/IP, port, path, query, fragment, token и полный SSID/password text.
 - Добавлен `diagnostic_redaction::RedactUrlForDiagnostics` и исполняемый static guard `firmware/scripts/check_sensitive_logging.py`. Host test, static guard, `git diff --check` и каноническая сборка `gosha-v1` прошли без устройства.
+- Follow-up fix после review wave2 дополнительно убрал raw response body из `self.screen.snapshot`; ответ теперь дочитывается, но не печатается.
 - Статическая сборка дала `gosha.bin` размером `3654368` байт, свободно 11% app-раздела; это только доказательство компиляции, не образ для установки.
 - До замены левой сервы и отдельного аппаратного допуска по-прежнему запрещены USB/serial, flash, перезагрузка ради теста, motion, `trim`, servo sequence и raw `:8080`.
 

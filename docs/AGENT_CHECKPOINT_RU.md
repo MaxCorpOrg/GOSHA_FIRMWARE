@@ -8,6 +8,7 @@
 - AFSK больше не выводит полный decoded text на экран и не печатает SSID/password text. Остаются безопасные длины SSID/password и понятное сообщение о получении данных.
 - Локальные статические проверки прошли без доступа к устройству: host test `diagnostic_redaction_host_test.cc`, `./scripts/check_sensitive_logging.py`, `git diff --check`, каноническая сборка `GOSHA_OTA_URL='<owner-only production endpoint>' python3 scripts/release.py gosha-v1 --name gosha-v1`.
 - Сборочный результат: `gosha.bin` — `3654368` байт, свободно 11% app-раздела; SHA-256 `94473bb2864e73c0897bf7b5116941508641089691de4f60baef826fbbe245cb`. `merged-binary.bin` SHA-256 `0b43aa4d988427bafbec366b7b666984c8bdaf9b408946a19496994f33ab0187`, ZIP SHA-256 `9084ec24e10e61fe096ae303a8c4f65315d80f8553581484eb3986b5c1e072fb`.
+- После первого review wave2 закрыт дополнительный блокер: `self.screen.snapshot` дочитывает upload response body, но больше не пишет его в журнал. Это важно, потому что ответ внешнего upload-сервиса может содержать подписанный URL, query или token. Static guard теперь проверяет и такую схему.
 - Это не аппаратный допуск и не release на установку. До замены левой сервы и отдельного допуска остаются запрещены USB/serial, flash, перезагрузка ради теста, motion, `trim`, servo sequence и raw `:8080`.
 
 ## Свежая контрольная точка 2026-08-27

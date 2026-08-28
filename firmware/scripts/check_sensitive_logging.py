@@ -50,8 +50,19 @@ def main() -> None:
         "FOUND_NEW_ASSETS, download_url.c_str()",
         "http->ReadAll().c_str()",
         "Failed to activate, code: %d, body: %s",
+        "Snapshot screen result: %s",
     ):
         require(forbidden not in combined_sources, f"forbidden full upgrade URL log remains: {forbidden}")
+
+    require(
+        "response body redacted" in mcp,
+        "snapshot upload response body should be drained but not logged",
+    )
+    require(
+        not re.search(r"std::string\s+\w+\s*=\s*http->ReadAll\(\);\s*http->Close\(\);\s*ESP_LOG[IEWD]\([^;]+\\.c_str\\(\\)",
+                      combined_sources, flags=re.DOTALL),
+        "HTTP response body still reaches a log call after ReadAll",
+    )
 
     require("userinfo" in helper, "diagnostic URL redaction must mark userinfo as redacted")
     require("query" in helper, "diagnostic URL redaction must mark query as redacted")

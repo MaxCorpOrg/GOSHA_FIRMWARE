@@ -238,9 +238,9 @@ void McpServer::AddUserOnlyTools() {
                 if (http->GetStatusCode() != 200) {
                     throw std::runtime_error("Unexpected status code: " + std::to_string(http->GetStatusCode()));
                 }
-                std::string result = http->ReadAll();
+                (void)http->ReadAll();
                 http->Close();
-                ESP_LOGI(TAG, "Snapshot screen result: %s", result.c_str());
+                ESP_LOGI(TAG, "Snapshot screen upload succeeded, response body redacted");
                 return true;
             });
         
