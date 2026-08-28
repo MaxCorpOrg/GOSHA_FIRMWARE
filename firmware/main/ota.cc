@@ -2,6 +2,7 @@
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
+#include "diagnostic_redaction.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -299,7 +300,8 @@ void Ota::MarkCurrentVersionValid() {
 }
 
 bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progress, size_t speed)> callback) {
-    ESP_LOGI(TAG, "Upgrading firmware from %s", firmware_url.c_str());
+    const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(firmware_url);
+    ESP_LOGI(TAG, "Upgrading firmware from %s", diagnostic_url.c_str());
     esp_ota_handle_t update_handle = 0;
     auto update_partition = esp_ota_get_next_update_partition(NULL);
     if (update_partition == NULL) {
@@ -517,7 +519,8 @@ esp_err_t Ota::Activate() {
         return ESP_ERR_TIMEOUT;
     }
     if (status_code != 200) {
-        ESP_LOGE(TAG, "Failed to activate, code: %d, body: %s", status_code, http->ReadAll().c_str());
+        (void)http->ReadAll();
+        ESP_LOGE(TAG, "Failed to activate, code: %d, response body redacted", status_code);
         return ESP_FAIL;
     }
 

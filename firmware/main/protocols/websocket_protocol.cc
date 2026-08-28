@@ -3,6 +3,7 @@
 #include "system_info.h"
 #include "application.h"
 #include "settings.h"
+#include "diagnostic_redaction.h"
 
 #include <cstring>
 #include <cJSON.h>
@@ -172,7 +173,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
         }
     });
 
-    ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);
+    const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(url);
+    ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", diagnostic_url.c_str(), version_);
     if (!websocket_->Connect(url.c_str())) {
         ESP_LOGE(TAG, "Failed to connect to websocket server, code=%d", websocket_->GetLastError());
         SetError(Lang::Strings::SERVER_NOT_CONNECTED);
