@@ -42,23 +42,23 @@
 
 ## Самая свежая точка 2026-07-23
 
-- Экранная ветка: `feature/firmware-orange-eyes` в `/home/max/worktrees/gosha/firmware-orange-eyes`, база `af4de9c`.
+- Экранная ветка: `feature/firmware-orange-eyes` в `<FIRMWARE_ORANGE_EYES_WORKTREE>`, база `af4de9c`.
 - Для `gosha-v1` подготовлен единый тёмно-оранжевый приборный профиль `#E06F00`: глаза, Wi-Fi, батарея, беззвучный режим, центральный статус, уведомления и резервный значок эмоции.
 - Цвет имеет один источник `GOSHA_UI_ACCENT_COLOR_HEX`; фон платы принудительно остаётся чистым чёрным даже при будущих ресурсных темах, а критическое предупреждение низкого заряда остаётся красным.
 - Все 21 GIF и 692 кадра проверены пиксельно; остальные платы не затронуты.
 - Каноническая сборка прошла. SHA-256: `gosha.bin` — `6d466b9a2a6299fc1cd73048b30452f051163026b199268fc3e92638d5dd481d`, `generated_assets.bin` — `12520722b9a56c0b687d072cb668e2f0ede0260b3a7fdef365abe81015231516`.
 - ИИ-офис `task-20260723T090714Z-read-only-review-firmware-dark-orange-instrument-panel` не нашёл кодовых P0/P1/P2; найденное замечание к старым документам исправлено. Финальная проверка `task-20260723T091854Z-final-read-only-review-dark-orange-instrument-profile` также завершилась без P0/P1/P2.
-- Перед установкой сохранены точные резервные копии прежнего приложения и ресурсов: `/tmp/gosha-app-before-dark-orange-20260723.bin`, SHA-256 `8046e3804b3d1f5f741e81c7e821894dffd618941cad6792742da4918ef31fd4`; `/tmp/gosha-assets-before-dark-orange-20260723.bin`, SHA-256 `871b1b74b98741c48c34d178588ae816fdba2e8197af1a36c46a3667acf70729`.
+- Перед установкой сохранены точные резервные копии прежнего приложения и ресурсов: `<PRIVATE_APP_BACKUP>`, SHA-256 `8046e3804b3d1f5f741e81c7e821894dffd618941cad6792742da4918ef31fd4`; `<PRIVATE_ASSETS_BACKUP>`, SHA-256 `871b1b74b98741c48c34d178588ae816fdba2e8197af1a36c46a3667acf70729`.
 - Новый профиль установлен согласованной парой: приложение записано только по `0x20000`, ресурсы — только по `0x800000`. NVS, `otadata`, таблица разделов и загрузчик не изменялись.
 - `verify_flash` подтвердил совпадение обоих разделов с собранными файлами; повторное наблюдение по UART продлено до 600 секунд без паники, сторожевого таймера и повторной загрузки, минимальная свободная память `66999` байт.
 - На этой точной паре подтверждены свежие события робота, живой OTA-контракт и полный цикл восстановления Android/панели.
-- Доказательство: `/home/max/AI_OFFICE/local_only/ai-office/logs/task-20260723T111058Z-read-only/live-validation/acceptance-evidence.json`, SHA-256 `600c3d526dddf95a39c38c1cf126a952d02a2e6b7b506f8a591b6f94d7690f0e`.
+- Доказательство: `<PRIVATE_VALIDATION_EVIDENCE>/task-20260723T111058Z-read-only/live-validation/acceptance-evidence.json`, SHA-256 `600c3d526dddf95a39c38c1cf126a952d02a2e6b7b506f8a591b6f94d7690f0e`.
 - Следующий шаг: визуально проверить приборную строку и глаза, затем повторить слово пробуждения и один голосовой диалог.
 - Этот ресурс содержит также текущую модель слова пробуждения, поэтому устанавливать его можно только поверх совместимого `gosha-v1` того же контура.
 
 ## Предыдущая точка 2026-07-22
 
-- Профильная ветка: `feature/firmware-triangle-runtime` в `/home/max/worktrees/gosha/firmware-triangle-runtime`.
+- Профильная ветка: `feature/firmware-triangle-runtime` в `<FIRMWARE_TRIANGLE_WORKTREE>`.
 - База: `origin/main`, коммит `0980c2a`.
 - Стадия: отдельный неблокирующий канал событий прошивки для общего контура собран, проверен и установлен на тестового робота.
 - Первый живой образ перезапускался из-за гонки завершения фоновой TCP-задачи; робот сразу возвращён на стабильный образ, после чего исправлены оба пути `EspTcp` и `EspSsl`.
@@ -74,7 +74,7 @@
 ## Сначала прочитать
 
 1. `../AGENTS.md`
-2. `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+2. `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`
 3. `NEW_CHAT_CHECKPOINT_RU.md`
 4. `AGENT_CHECKPOINT_RU.md`
 5. `PROJECT_STATUS_RU.md`
@@ -92,21 +92,21 @@
 - Публичный URL репозитория:
   - `https://github.com/MaxCorpOrg/GOSHA_FIRMWARE`
 - Дерево исходников прошивки уже импортировано в:
-  - `/home/max/GOSHA_FIRMWARE/firmware`
+  - `<FIRMWARE_WORKSPACE>/firmware`
 - Канонический источник импорта уже зафиксирован:
-  - `/home/max/MAX_CORP_CORE/AI_ROBOT/xiaozhi-esp32`
+  - `<LEGACY_FIRMWARE_SOURCE>`
 - Канонический эталон сравнения и отката уже зафиксирован:
-  - `/home/max/MAX_CORP_CORE/AI_ROBOT/new/v2.0.5_otto-robot/merged-binary.bin`
+  - `<LEGACY_FIRMWARE_ARTIFACT>`
 - Профиль `gosha-v1` уже создан как копия `otto-robot`.
 - Профиль `gosha-v1` уже виден в `scripts/release.py --list-boards`.
 - Текущий реально прошитый порог слова пробуждения:
   - `38`
 - Порог `50` пока не нужен.
 - Рабочий `ESP-IDF` уже поднят:
-  - `/home/max/esp/esp-idf-v5.5.2`
+  - `<ESP_IDF_ROOT>`
 - Первый полный build уже выполнен успешно.
 - Первый merged-образ уже получен:
-  - `/home/max/GOSHA_FIRMWARE/firmware/build/merged-binary.bin`
+  - `firmware/build/merged-binary.bin`
 - Первое тестовое устройство уже прошито.
 - Экранный сбой на ранней инициализации уже исправлен.
 - Ошибка `404` при обращении к серверу уже локализована:
@@ -158,9 +158,9 @@
   - по журналу подтверждено, что это был не двойной запуск, а сбой локального декодирования;
   - локальные `Opus`-пакеты в `assets/locales/ru-RU` идут по `80 ms`, а `AudioService` ошибочно помечал их как `60 ms`;
   - в `firmware/main/audio/audio_service.cc` уже добавлен расчёт реальной длительности пакета;
-  - новый `gosha.bin` уже собран и прошит на тестовое устройство через `/dev/ttyACM0`
+  - новый `gosha.bin` уже собран и прошит на тестовое устройство через `<ROBOT_SERIAL_PORT>`
 - Общая карта связанных контуров теперь зафиксирована здесь:
-  - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+  - `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`
 
 ## Что делать следующим
 

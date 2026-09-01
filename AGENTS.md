@@ -6,7 +6,7 @@
 
 1. Прочитай `START_HERE_FOR_NEW_CHAT.md`.
 2. Затем прочитай:
-   - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+   - `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`
    - `docs/NEW_CHAT_CHECKPOINT_RU.md`
    - `docs/AGENT_CHECKPOINT_RU.md`
    - `docs/PROJECT_STATUS_RU.md`
@@ -51,7 +51,7 @@
 
 - `GOSHA_FIRMWARE` живёт отдельно от `GOSHA_PLATFORM` и отдельно от `AI_ROBOT`.
 - Если непонятно, где сервер, где мобильный клиент и где голоса, сначала смотри:
-  - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+  - `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`
 - `GOSHA_FIRMWARE` — часть масштабируемого проекта `Гоша`:
   - много роботов;
   - много профилей ИИ-агентов;
@@ -77,7 +77,7 @@
 
 - Для параллельных направлений по прошивке используй отдельные рабочие деревья `git worktree`, а не одну общую рабочую копию.
 - Канонический путь ручных рабочих деревьев разработчика:
-  - `/home/max/worktrees/gosha/<контур>-<задача>`
+  - `<TASK_WORKTREE>`
 - Для новых ручных задач в `GOSHA_FIRMWARE` базой по умолчанию считай `main`.
 - Для ручных рабочих веток используй такие префиксы:
   - `feature/` — продуктовая функция

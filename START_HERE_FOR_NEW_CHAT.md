@@ -27,7 +27,7 @@
 ## Сначала прочитать
 
 1. `AGENTS.md`
-2. `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+2. `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`
 3. `docs/NEW_CHAT_CHECKPOINT_RU.md`
 4. `docs/AGENT_CHECKPOINT_RU.md`
 5. `docs/PROJECT_STATUS_RU.md`
@@ -59,18 +59,18 @@
 - `GOSHA_FIRMWARE` — отдельный репозиторий собственной прошивки `Гоша`.
 - Репозиторий не должен становиться продолжением `AI_ROBOT`; `AI_ROBOT` используется только как источник одноразового импорта и справки.
 - Исходная база уже импортирована в:
-  - `/home/max/GOSHA_FIRMWARE/firmware`
+  - `<FIRMWARE_WORKSPACE>/firmware`
 - Первая целевая плата:
   - `gosha-v1`
   - на основе `otto-robot`
 - Рабочая локальная среда сборки уже поднята:
-  - `/home/max/esp/esp-idf-v5.5.2`
+  - `<ESP_IDF_ROOT>`
 - Первый merged-образ уже собран:
-  - `/home/max/GOSHA_FIRMWARE/firmware/build/merged-binary.bin`
+  - `firmware/build/merged-binary.bin`
 - Прошивка проектируется как часть масштабируемой платформы `Гоша`:
   - много роботов;
   - много профилей ИИ-агентов;
   - много OpenAI-совместимых провайдеров на стороне платформы;
   - без жёсткой привязки к одному облаку или одной модели.
 - Если нужно быстро понять, где серверный голос, панель и мобильный клиент, смотри:
-  - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+  - `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`

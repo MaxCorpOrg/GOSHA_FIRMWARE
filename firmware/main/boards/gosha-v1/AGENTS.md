@@ -4,10 +4,10 @@
 
 ## Перед работой прочитать
 
-1. `/home/max/GOSHA_FIRMWARE/AGENTS.md`
-2. `/home/max/GOSHA_FIRMWARE/docs/PROJECT_STATUS_RU.md`
-3. `/home/max/GOSHA_FIRMWARE/docs/HARDWARE_MANIFEST_RU.md`
-4. `/home/max/GOSHA_FIRMWARE/docs/PIN_MAP_RU.md`
+1. `<FIRMWARE_WORKSPACE>/AGENTS.md`
+2. `<FIRMWARE_WORKSPACE>/docs/PROJECT_STATUS_RU.md`
+3. `<FIRMWARE_WORKSPACE>/docs/HARDWARE_MANIFEST_RU.md`
+4. `<FIRMWARE_WORKSPACE>/docs/PIN_MAP_RU.md`
 
 ## Что здесь менять
 
@@ -42,10 +42,10 @@
   - не использовать полный набор `flash_args` или объединённый образ, если задача не требует менять NVS, `otadata`, таблицу разделов и загрузчик;
   - помнить, что этот раздел содержит также модель и метаданные слова пробуждения, поэтому ресурс нельзя переносить на произвольную старую прошивку.
 - После значимой правки обновлять:
-  - `/home/max/GOSHA_FIRMWARE/docs/PROJECT_STATUS_RU.md`
-  - `/home/max/GOSHA_FIRMWARE/docs/AGENT_CHECKPOINT_RU.md`
-  - `/home/max/GOSHA_FIRMWARE/docs/HARDWARE_MANIFEST_RU.md`, если изменилась реальная аппаратная конфигурация
-  - `/home/max/GOSHA_FIRMWARE/docs/PIN_MAP_RU.md`, если изменились или подтвердились выводы
+  - `<FIRMWARE_WORKSPACE>/docs/PROJECT_STATUS_RU.md`
+  - `<FIRMWARE_WORKSPACE>/docs/AGENT_CHECKPOINT_RU.md`
+  - `<FIRMWARE_WORKSPACE>/docs/HARDWARE_MANIFEST_RU.md`, если изменилась реальная аппаратная конфигурация
+  - `<FIRMWARE_WORKSPACE>/docs/PIN_MAP_RU.md`, если изменились или подтвердились выводы
 
 ## Язык и формат
 
