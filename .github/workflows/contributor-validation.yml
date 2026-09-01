@@ -1,0 +1,28 @@
+name: contributor-validation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  firmware-static-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Check sensitive diagnostic logging
+        run: python3 firmware/scripts/check_sensitive_logging.py
+      - name: Compile and run diagnostic redaction host test
+        run: |
+          g++ -std=c++17 -Ifirmware/main \
+            firmware/main/diagnostic_redaction.cc \
+            firmware/scripts/diagnostic_redaction_host_test.cc \
+            -o "${RUNNER_TEMP}/diagnostic_redaction_host_test"
+          "${RUNNER_TEMP}/diagnostic_redaction_host_test"
+      - name: Validate changed files
+        run: git diff --check "$(git merge-base origin/main HEAD)" HEAD
