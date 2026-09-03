@@ -70,22 +70,42 @@
 
 ## Текущая контрольная точка
 
-- `2026-09-03`: ветка `codex/hardware-development-enabled-20260903` на
-  `e3fa25c0e55a` содержит только актуализацию аппаратной политики поверх
-  продуктового кода `a8326d6818cb1ed72db8a5cc00c00b5366f270b8`.
-- Свежий canonical `gosha-v1` build прошёл; `gosha.bin` размером `3654384`
-  байт установлен только в app-раздел `0x20000` после полного 16-MB backup.
-  Write hash и отдельный `verify_flash` прошли; NVS, `otadata`, bootloader,
-  partition table и assets сохранены.
-- Живой smoke подтвердил стабильную загрузку, Wi-Fi, platform/OTA/runtime
-  events, локальный WebSocket, read-only identity, wake word и голосовой
-  диалог без panic/watchdog/reset loop. Внешние motion-команды не отправлялись.
-- Draft PR `#24`, ветка `feature/firmware-orange-eyes`, проверенный code head `7751a3ca326174d217536f6a8de7c09433c3e955`.
-- Immutable AI Office review `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом `GPT-5.5 / xhigh` дал terminal `PASS` без P0/P1/P2.
-- Статический gate закрыт, PR остаётся Draft/Open. Неисправная левая серва
-  физически отключена; с `2026-09-03` USB/serial, flash, power-cycle и
-  перезагрузка разрешены по `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`. Motion,
-  `Home`, `set_trim` и servo sequence требуют отдельной явной команды владельца.
+- `2026-09-03`: Draft PR `#33`, ветка
+  `codex/noncamera-pinmap-ledc-fix-20260903`, base
+  `codex/hardware-development-enabled-20260903`, остаётся Draft/Open.
+  Фактический текущий head не фиксировать в этой ветке как источник истины:
+  перед работой проверять его через
+  `gh pr view 33 --repo MaxCorpOrg/GOSHA_FIRMWARE --json headRefOid`.
+- Первый docs-policy follow-up этой ветки:
+  `565c4213a1a5dea16193faca0458daea250103f7`; это lineage документации, а не
+  прошитый build.
+- В этом PR правый канал руки оставлен на `GPIO12`, non-camera
+  `display_cs_pin` отключён через `GPIO_NUM_NC`, повторный `AttachServos()`
+  убран из `ActionTask`, а static guard проверяет дубли активных non-NC GPIO.
+- Уже выполненная hardware-window установка PR `#33` была app-only из
+  `c81d24c941be8cadd6a96c9bbddd2884bf5906ae`: `gosha.bin` `3654400` байт,
+  SHA-256 `603b1609615a530ff9b138bcfad9d73cf3d01ddee352d1483e17044a2694dd41`.
+  Записан только app-раздел `0x20000`; NVS, `otadata`, bootloader, partition
+  table и assets не менялись. `write_flash` и отдельный `verify_flash`
+  прошли, rollback не потребовался.
+- Короткий serial smoke подтвердил boot `gosha 2.2.2`, ESP-IDF `5.5.2`, Wi-Fi,
+  OTA/config, runtime events, локальный WebSocket и `idle` без panic/watchdog,
+  brownout или reset loop. Servo LEDC warnings по выводам приводов исчезли;
+  warning по `GPIO3` backlight и sample-rate `16000/24000` остаются отдельными
+  хвостами. Внешние motion, `Home`, `set_trim`, servo sequence и raw
+  WebSocket-команды не выполнялись.
+- Предыдущий app-only rollout из `codex/hardware-development-enabled-20260903`
+  на `e3fa25c0e55a` также прошёл backup, write/verify и живой
+  boot/network/WebSocket/wake/voice smoke; продуктовый код соответствовал
+  статически принятому `a8326d6818cb1ed72db8a5cc00c00b5366f270b8`.
+- Draft PR `#24`, ветка `feature/firmware-orange-eyes`, проверенный code head
+  `7751a3ca326174d217536f6a8de7c09433c3e955`, получил immutable AI Office
+  review `PASS` без P0/P1/P2 и остаётся историческим статическим gate.
+- Неисправная левая серва физически отключена. Flash, reboot и update
+  разрешены только по явной задаче владельца после no-motion preflight:
+  подтверждены профиль платы, питание, кабель/порт, отключение левой руки,
+  backup, verify и rollback. Motion, `Home`, `set_trim` и servo sequence
+  требуют отдельной явной команды владельца и механического допуска.
 
 ## Правила веток и `git worktree`
 

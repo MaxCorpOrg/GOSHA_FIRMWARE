@@ -4,6 +4,40 @@
 
 ## Самая свежая аппаратная точка
 
+- Фактический текущий head Draft PR `#33` не фиксируется в этом файле:
+  перед работой проверяй его через
+  `gh pr view 33 --repo MaxCorpOrg/GOSHA_FIRMWARE --json headRefOid`.
+- Первый docs-policy follow-up этой ветки:
+  `565c4213a1a5dea16193faca0458daea250103f7`; это lineage документации поверх
+  уже установленного app-only кандидата. Новый flash для docs-only head не
+  выполнялся и не требуется.
+- `2026-09-03` из `codex/noncamera-pinmap-ledc-fix-20260903 @
+  c81d24c941be8cadd6a96c9bbddd2884bf5906ae` выполнена свежая canonical
+  сборка `gosha-v1` на ESP-IDF `5.5.2` с owner-only `GOSHA_OTA_URL` без
+  вывода значения. `gosha.bin` — `3654400` байт, SHA-256
+  `603b1609615a530ff9b138bcfad9d73cf3d01ddee352d1483e17044a2694dd41`,
+  свободно 11% app-раздела.
+- Перед записью подтверждены `ESP32-S3` rev `v0.2`, flash `16MB`, `3.3V`,
+  rollback: полный backup `16 MB` mode `600` с SHA-256
+  `c3dee211b4b66d49500447bfc9cf66d97e7ec65f9d631da76ecb0c13249d594a` и
+  предыдущий app rollback image `3654384` байта с SHA-256
+  `78fe6c115a44fa4e9f40b0e990c3e6162e1acfc8cdac5ff1b10ed1bf628d5764`.
+- Partition table на устройстве совпала с build
+  (`4811619cacae08ef2e0e71b7220c6033a346ca5da7ca179082408c963ef530b5`),
+  assets тоже совпали
+  (`12520722b9a56c0b687d072cb668e2f0ede0260b3a7fdef365abe81015231516`).
+  Записан только app-раздел `0x20000`; NVS, `otadata`, bootloader, partition
+  table и assets не изменялись. `write_flash` и отдельный `verify_flash`
+  прошли, rollback не потребовался.
+- Короткий serial smoke после установки подтвердил `gosha 2.2.2`, ESP-IDF
+  `5.5.2`, 8 MB PSRAM, Wi-Fi, OTA/config, runtime events, локальный
+  `WebSocket` `8080`, threshold `0.380000` и переход в `idle`. Panic,
+  watchdog, brownout и reset loop не наблюдались; был один ожидаемый reset от
+  monitor. Внешние motion, `Home`, `set_trim`, servo sequence и raw WS-команды
+  не отправлялись. Servo LEDC warnings по `GPIO8/12/17/18/38/39` исчезли;
+  отдельно остались warning по `GPIO3` backlight и sample-rate warning
+  `16000/24000`. Wake/voice не форсировались и в пассивном окне не
+  наблюдались.
 - `2026-09-03` из `codex/hardware-development-enabled-20260903 @ e3fa25c0e55a`
   выполнена свежая canonical сборка `gosha-v1`; продуктовый код соответствует
   статически принятому `a8326d6818cb1ed72db8a5cc00c00b5366f270b8`.
@@ -27,8 +61,9 @@
 - Каноническая статическая сборка с неразрешимым тестовым endpoint `.invalid` прошла: `gosha.bin` — `3652384` байт, свободно 12% app-раздела. Этот артефакт не предназначен для установки.
 - Immutable AI Office task `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом профиле `GPT-5.5 / xhigh` дала terminal `PASS`: P0/P1/P2 нет, точный remote/PR head подтверждён. Служебный upstream symlink удалён, а snapshot с исходниками и документацией принят secure exporter.
 - Статический firmware gate закрыт. Неисправная левая серва физически
-  отключена; с `2026-09-03` USB/serial, flash, power-cycle и перезагрузка
-  разрешены по `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`. Motion, `Home`,
+  отключена; с `2026-09-03` USB/serial, flash, update, power-cycle и
+  перезагрузка разрешены только по `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`:
+  no-motion preflight, backup, verify и rollback обязательны. Motion, `Home`,
   `set_trim` и servo sequence остаются закрыты до отдельной команды. Draft PR
   не сливать без общей проверки.
 
@@ -38,16 +73,19 @@
 - Роли портов фиксируются логическими именами без IP-адресов, секретов и хардкода в прошивке: `18876` — HTTP-контур панели, OTA и config; `18080` — голосовой `WebSocket` и совместимый `MCP`.
 - В конце месяца канал нужно перенести с `TEMP_NL_RELAY` на `FUTURE_PRODUCTION_SERVER`, после чего повторить короткую сетевую проверку.
 - Новый физический робот подтверждён как `gosha-main`: Android показывает `Гоша Main`, робот разговаривает, голосовой сценарий принят.
-- Firmware quality gate на `feature/firmware-orange-eyes @ 07d5f6658b6c70c81626ebcc3fbee930ced94fc6`: Draft PR допустим, но merge и установка пока `NO-GO`. Причины: в старых документах `self.otto.stop` был указан как безопасная проверка, хотя он запускает возврат в `Home`; `git diff --check` падает на хвостовых пробелах в vendored-компоненте; существующий release ZIP содержит устаревший merged-образ.
+- Firmware quality gate на `feature/firmware-orange-eyes @ 07d5f6658b6c70c81626ebcc3fbee930ced94fc6`: на `2026-08-25` Draft PR был допустим, а merge и установка были остановлены по конкретным причинам: в старых документах `self.otto.stop` был указан как безопасная проверка, хотя он запускает возврат в `Home`; `git diff --check` падал на хвостовых пробелах в vendored-компоненте; существующий release ZIP содержал устаревший merged-образ.
 - `2026-08-23` новый робот после полной резервной копии переведён с несовместимой заводской разметки на полный образ `gosha-v1` из `feature/firmware-orange-eyes @ 80310104e895d02d648364460e82d0c2b31e8ba8`.
 - Запись, отдельный `verify_flash` и первый контролируемый запуск успешны.
 - Прошивка стабильна; левый канал `GPIO8` подтверждён перекрёстным тестом.
 - Физический сервопривод левой руки отключён от платы и должен оставаться
-  отключённым до замены. Прошивка, перезагрузка и неподвижные проверки
-  локального `:8080` разрешены по аппаратной политике; движения, `set_trim` и
-  servo sequence требуют отдельной команды.
-- Ближайший шаг — создать отдельную рабочую ветку, собрать новый кандидат,
-  подготовить rollback, установить его и снять serial/hardware evidence.
+  отключённым до ремонта или замены. Это не является общим блокером для
+  flash, reboot, update и неподвижных проверок, если выполнены условия
+  аппаратной политики: no-motion preflight, backup, verify и rollback.
+  Движения, `Home`, `set_trim` и servo sequence требуют отдельной команды.
+- Исторический ближайший шаг из этой точки уже закрыт PR `#33`: кандидат
+  собран, установлен app-only и проверен коротким serial smoke. Следующий
+  firmware-шаг без нового hardware-window — разбирать оставшиеся warning
+  `GPIO3` backlight и sample-rate `16000/24000` без команд движения.
 
 ## Сначала прочитать
 
