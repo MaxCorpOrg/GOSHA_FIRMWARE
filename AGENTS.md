@@ -13,6 +13,7 @@
    - `docs/FIRMWARE_IMPORT_CHECKPOINT_RU.md`
    - `docs/HARDWARE_MANIFEST_RU.md`
    - `docs/PIN_MAP_RU.md`
+   - `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`
 3. Если появятся новые рабочие подпапки, сначала читай их локальный `AGENTS.md`.
 
 ## Обязательный вход в новый чат
@@ -71,7 +72,9 @@
 
 - Draft PR `#24`, ветка `feature/firmware-orange-eyes`, проверенный code head `7751a3ca326174d217536f6a8de7c09433c3e955`.
 - Immutable AI Office review `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом `GPT-5.5 / xhigh` дал terminal `PASS` без P0/P1/P2.
-- Статический gate закрыт, но PR остаётся Draft/Open. До замены неисправной левой сервы запрещены USB/serial, flash, перезагрузка ради теста, motion и trim.
+- Статический gate закрыт, PR остаётся Draft/Open. Неисправная левая серва
+  физически отключена; с `2026-09-03` USB/serial, flash, перезагрузка, motion и
+  trim разрешены по `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`.
 
 ## Правила веток и `git worktree`
 
