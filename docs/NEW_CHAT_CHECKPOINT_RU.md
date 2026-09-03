@@ -12,6 +12,19 @@
 - Повторный `AttachServos()` удалён только из `ActionTask`; `Otto::Init()` и
   boot `ACTION_HOME` сохранены. Новый статический guard
   `firmware/scripts/check_gosha_v1_pinmap.py` ловит дубли активных non-NC GPIO.
+- Live rollout этой же ветки выполнен app-only на точном
+  `c81d24c941be8cadd6a96c9bbddd2884bf5906ae`. Fresh canonical build ESP-IDF
+  `5.5.2`: `gosha.bin` — `3654400` байт, SHA-256
+  `603b1609615a530ff9b138bcfad9d73cf3d01ddee352d1483e17044a2694dd41`;
+  `generated_assets.bin` и partition table совпали с устройством, поэтому
+  записан только `0x20000`. `write_flash` и отдельный `verify_flash` прошли;
+  NVS, `otadata`, bootloader, partition table и assets не менялись.
+- Serial smoke подтвердил boot `gosha 2.2.2`, ESP-IDF `5.5.2`, 8 MB PSRAM,
+  Wi-Fi, OTA/config, runtime events, локальный `WebSocket` `8080`, threshold
+  `0.380000` и `idle` без panic/watchdog/brownout/reset loop. Servo LEDC
+  warnings исчезли; warning по `GPIO3` backlight и sample-rate warning
+  `16000/24000` остались отдельными хвостами. Motion-команды и raw WS probe не
+  выполнялись; rollback не потребовался.
 
 ## Живая точка 2026-09-03
 

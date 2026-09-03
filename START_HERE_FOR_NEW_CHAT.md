@@ -4,6 +4,33 @@
 
 ## Самая свежая аппаратная точка
 
+- `2026-09-03` из `codex/noncamera-pinmap-ledc-fix-20260903 @
+  c81d24c941be8cadd6a96c9bbddd2884bf5906ae` выполнена свежая canonical
+  сборка `gosha-v1` на ESP-IDF `5.5.2` с owner-only `GOSHA_OTA_URL` без
+  вывода значения. `gosha.bin` — `3654400` байт, SHA-256
+  `603b1609615a530ff9b138bcfad9d73cf3d01ddee352d1483e17044a2694dd41`,
+  свободно 11% app-раздела.
+- Перед записью подтверждены `ESP32-S3` rev `v0.2`, flash `16MB`, `3.3V`,
+  rollback: полный backup `16 MB` mode `600` с SHA-256
+  `c3dee211b4b66d49500447bfc9cf66d97e7ec65f9d631da76ecb0c13249d594a` и
+  предыдущий app rollback image `3654384` байта с SHA-256
+  `78fe6c115a44fa4e9f40b0e990c3e6162e1acfc8cdac5ff1b10ed1bf628d5764`.
+- Partition table на устройстве совпала с build
+  (`4811619cacae08ef2e0e71b7220c6033a346ca5da7ca179082408c963ef530b5`),
+  assets тоже совпали
+  (`12520722b9a56c0b687d072cb668e2f0ede0260b3a7fdef365abe81015231516`).
+  Записан только app-раздел `0x20000`; NVS, `otadata`, bootloader, partition
+  table и assets не изменялись. `write_flash` и отдельный `verify_flash`
+  прошли, rollback не потребовался.
+- Короткий serial smoke после установки подтвердил `gosha 2.2.2`, ESP-IDF
+  `5.5.2`, 8 MB PSRAM, Wi-Fi, OTA/config, runtime events, локальный
+  `WebSocket` `8080`, threshold `0.380000` и переход в `idle`. Panic,
+  watchdog, brownout и reset loop не наблюдались; был один ожидаемый reset от
+  monitor. Внешние motion, `Home`, `set_trim`, servo sequence и raw WS-команды
+  не отправлялись. Servo LEDC warnings по `GPIO8/12/17/18/38/39` исчезли;
+  отдельно остались warning по `GPIO3` backlight и sample-rate warning
+  `16000/24000`. Wake/voice не форсировались и в пассивном окне не
+  наблюдались.
 - `2026-09-03` из `codex/hardware-development-enabled-20260903 @ e3fa25c0e55a`
   выполнена свежая canonical сборка `gosha-v1`; продуктовый код соответствует
   статически принятому `a8326d6818cb1ed72db8a5cc00c00b5366f270b8`.

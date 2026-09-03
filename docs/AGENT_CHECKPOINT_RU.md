@@ -12,8 +12,23 @@
   правую руку на `GPIO12`, отключает `display_cs_pin` через `GPIO_NUM_NC` и
   добавляет статический guard дублей активных non-NC GPIO для `gosha-v1`.
 - Из `ActionTask` удалён повторный `AttachServos()`. `Otto::Init()` и boot
-  `ACTION_HOME` не менялись. Робот, USB/serial, flash, reboot и motion не
-  использовались.
+  `ACTION_HOME` не менялись.
+- Hardware-window rollout выполнен на exact
+  `c81d24c941be8cadd6a96c9bbddd2884bf5906ae`: canonical build ESP-IDF
+  `5.5.2` с owner-only OTA URL без вывода значения, `gosha.bin` `3654400`
+  байт, SHA-256
+  `603b1609615a530ff9b138bcfad9d73cf3d01ddee352d1483e17044a2694dd41`,
+  11% свободно в app-разделе.
+- Preflight подтвердил `ESP32-S3` rev `v0.2`, flash `16MB`, backup/rollback,
+  совпадение partition table и assets с устройством. Записан только
+  app-раздел `0x20000`; NVS, `otadata`, bootloader, partition table и assets
+  не изменялись. `write_flash` и отдельный `verify_flash` успешны.
+- Serial smoke подтвердил boot/version/PSRAM/Wi-Fi/OTA/runtime events/local
+  WebSocket/idle без panic, watchdog, brownout и reset loop. Servo LEDC
+  warnings по выводам приводов больше не появились; warning по `GPIO3`
+  backlight и sample-rate warning `16000/24000` остаются отдельными хвостами.
+  Motion, `Home`, `set_trim`, servo sequence и raw WS probe не выполнялись.
+  Rollback не потребовался.
 
 ## Живая установка 2026-09-03
 

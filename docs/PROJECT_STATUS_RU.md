@@ -13,8 +13,32 @@
   `Otto::Init()` и boot `ACTION_HOME` не изменены. Добавлен статический guard
   `firmware/scripts/check_gosha_v1_pinmap.py`, который ловит дубли активных
   non-NC GPIO и игнорирует намеренные `GPIO_NUM_NC`.
-- Это статическая правка без USB/serial/flash/reboot/motion. Физическая
-  пригодность остальных `LEDC`-выводов остаётся отдельным аппаратным риском.
+- `2026-09-03` эта ветка установлена на живой робот строго app-only из exact
+  `c81d24c941be8cadd6a96c9bbddd2884bf5906ae`. Canonical build ESP-IDF
+  `5.5.2`: `gosha.bin` — `3654400` байт, SHA-256
+  `603b1609615a530ff9b138bcfad9d73cf3d01ddee352d1483e17044a2694dd41`;
+  `merged-binary.bin` — `13790351` байт, SHA-256
+  `51156563b3948e9c095e6af0843c13a80737fd5fc4f3a59859241fa31fe42a68`;
+  release ZIP — `6390845` байт, SHA-256
+  `1e6db03a397413f9660ab3179f17841c5ce21576ab37b0cf5acbc7c36a064394`.
+- Preflight подтвердил существующий full-flash rollback backup `16 MB` mode
+  `600`, предыдущий app rollback image, `ESP32-S3` rev `v0.2`, flash `16MB`,
+  режим `dio/80m/16MB`, совпадение partition table и assets с устройством.
+  Assets SHA-256:
+  `12520722b9a56c0b687d072cb668e2f0ede0260b3a7fdef365abe81015231516`;
+  partition table SHA-256:
+  `4811619cacae08ef2e0e71b7220c6033a346ca5da7ca179082408c963ef530b5`.
+- Записан только app-раздел `0x20000`; NVS, `otadata`, bootloader, partition
+  table и assets не изменялись. `write_flash` подтвердил hash, отдельный
+  `verify_flash` дал `verify OK (digest matched)`. Rollback не потребовался.
+- Короткий serial smoke подтвердил boot `gosha 2.2.2`, ESP-IDF `5.5.2`, 8 MB
+  PSRAM, Wi-Fi, OTA/config, runtime events, локальный `WebSocket` `8080`,
+  threshold `0.380000` и переход в `idle`. Panic, watchdog, brownout и reset
+  loop не наблюдались; был один ожидаемый reset от monitor. Servo LEDC
+  warnings по `GPIO8`, `GPIO12`, `GPIO17`, `GPIO18`, `GPIO38`, `GPIO39`
+  исчезли. Остались отдельные хвосты: warning по `GPIO3` backlight и
+  sample-rate warning `16000/24000`. Motion, `Home`, `set_trim`, servo
+  sequence и raw WS probe не выполнялись.
 
 ## Живая установка hardening-кандидата 2026-09-03
 
