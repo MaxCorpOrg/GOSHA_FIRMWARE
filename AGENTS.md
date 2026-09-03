@@ -72,7 +72,7 @@
 
 - `2026-09-03`: Draft PR `#33`, ветка
   `codex/noncamera-pinmap-ledc-fix-20260903`, текущий head
-  `325dba1af406896a460d9544481cbe7bf177f389`, base
+  `565c4213a1a5dea16193faca0458daea250103f7`, base
   `codex/hardware-development-enabled-20260903`, остаётся Draft/Open.
 - В этом PR правый канал руки оставлен на `GPIO12`, non-camera
   `display_cs_pin` отключён через `GPIO_NUM_NC`, повторный `AttachServos()`

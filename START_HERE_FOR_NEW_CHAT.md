@@ -5,7 +5,7 @@
 ## Самая свежая аппаратная точка
 
 - Текущий Draft PR `#33` находится на
-  `325dba1af406896a460d9544481cbe7bf177f389`; это docs-follow-up поверх уже
+  `565c4213a1a5dea16193faca0458daea250103f7`; это docs-follow-up поверх уже
   установленного app-only кандидата. Новый flash для этого docs head не
   выполнялся и не требуется.
 - `2026-09-03` из `codex/noncamera-pinmap-ledc-fix-20260903 @
