@@ -9,6 +9,8 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "runtime_event_reporter.h"
+#include "diagnostic_redaction.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -60,6 +62,7 @@ bool Application::SetDeviceState(DeviceState state) {
 
 void Application::Initialize() {
     auto& board = Board::GetInstance();
+    RuntimeEventReporter::GetInstance().Start();
     SetDeviceState(kDeviceStateStarting);
 
     // Setup the display
@@ -87,6 +90,9 @@ void Application::Initialize() {
 
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
+        RuntimeEventReporter::GetInstance().PublishDeviceState(
+            DeviceStateMachine::GetStateName(old_state),
+            DeviceStateMachine::GetStateName(new_state));
         xEventGroupSetBits(event_group_, MAIN_EVENT_STATE_CHANGED);
     });
 
@@ -101,6 +107,42 @@ void Application::Initialize() {
     // Set network event callback for UI updates and network state handling
     board.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
         auto display = Board::GetInstance().GetDisplay();
+        auto& runtime_events = RuntimeEventReporter::GetInstance();
+        switch (event) {
+            case NetworkEvent::Scanning:
+                runtime_events.PublishNetworkState("scanning", "connecting");
+                break;
+            case NetworkEvent::Connecting:
+                runtime_events.PublishNetworkState("connecting", "connecting");
+                break;
+            case NetworkEvent::Connected:
+                runtime_events.PublishNetworkState("connected", "available");
+                break;
+            case NetworkEvent::Disconnected:
+                runtime_events.PublishNetworkState("disconnected", "unavailable", "warning", "network_disconnected");
+                break;
+            case NetworkEvent::WifiConfigModeEnter:
+                runtime_events.PublishNetworkState("wifi_config", "connecting");
+                break;
+            case NetworkEvent::WifiConfigModeExit:
+                runtime_events.PublishNetworkState("wifi_config", "unavailable", "warning", "wifi_config_exited");
+                break;
+            case NetworkEvent::ModemDetecting:
+                runtime_events.PublishNetworkState("modem_detecting", "connecting");
+                break;
+            case NetworkEvent::ModemErrorNoSim:
+                runtime_events.PublishNetworkState("modem", "unavailable", "error", "modem_no_sim");
+                break;
+            case NetworkEvent::ModemErrorRegDenied:
+                runtime_events.PublishNetworkState("modem", "unavailable", "error", "modem_registration_denied");
+                break;
+            case NetworkEvent::ModemErrorInitFailed:
+                runtime_events.PublishNetworkState("modem", "unavailable", "error", "modem_init_failed");
+                break;
+            case NetworkEvent::ModemErrorTimeout:
+                runtime_events.PublishNetworkState("modem", "unavailable", "warning", "modem_timeout");
+                break;
+        }
         
         switch (event) {
             case NetworkEvent::Scanning:
@@ -247,6 +289,8 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_CLOCK_TICK) {
             clock_ticks_++;
+            const uint32_t uptime_seconds = static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
+            RuntimeEventReporter::GetInstance().MaybePublishHeartbeat(uptime_seconds);
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
         
@@ -359,7 +403,8 @@ void Application::CheckAssetsVersion() {
         settings.EraseKey("download_url");
 
         char message[256];
-        snprintf(message, sizeof(message), Lang::Strings::FOUND_NEW_ASSETS, download_url.c_str());
+        const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(download_url);
+        snprintf(message, sizeof(message), Lang::Strings::FOUND_NEW_ASSETS, diagnostic_url.c_str());
         Alert(Lang::Strings::LOADING_ASSETS, message, "cloud_arrow_down", Lang::Sounds::OGG_UPGRADE);
         
         // Wait for the audio service to be idle for 3 seconds
@@ -405,6 +450,10 @@ void Application::CheckNewVersion() {
 
         esp_err_t err = ota_->CheckVersion();
         if (err != ESP_OK) {
+            if (err == ESP_ERR_INVALID_ARG && ota_->GetCheckVersionUrl().empty()) {
+                ESP_LOGE(TAG, "OTA/config endpoint is not configured; skipping version check");
+                return;
+            }
             retry_count++;
             if (retry_count >= MAX_RETRY) {
                 ESP_LOGE(TAG, "Too many retries, exit version check");
@@ -412,7 +461,8 @@ void Application::CheckNewVersion() {
             }
 
             char error_message[128];
-            snprintf(error_message, sizeof(error_message), "code=%d, url=%s", err, ota_->GetCheckVersionUrl().c_str());
+            snprintf(error_message, sizeof(error_message), "code=%d, ota_url_configured=%s", err,
+                     ota_->GetCheckVersionUrl().empty() ? "no" : "yes");
             char buffer[256];
             snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, error_message);
             Alert(Lang::Strings::ERROR, buffer, "cloud_slash", Lang::Sounds::OGG_EXCLAMATION);
@@ -974,7 +1024,8 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
         ESP_LOGI(TAG, "Closing audio channel before firmware upgrade");
         protocol_->CloseAudioChannel();
     }
-    ESP_LOGI(TAG, "Starting firmware upgrade from URL: %s", upgrade_url.c_str());
+    const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(upgrade_url);
+    ESP_LOGI(TAG, "Starting firmware upgrade from %s", diagnostic_url.c_str());
 
     Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "download", Lang::Sounds::OGG_UPGRADE);
     vTaskDelay(pdMS_TO_TICKS(3000));
@@ -1114,4 +1165,3 @@ void Application::ResetProtocol() {
         protocol_.reset();
     });
 }
-

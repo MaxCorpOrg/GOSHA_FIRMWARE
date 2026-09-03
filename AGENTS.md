@@ -6,13 +6,14 @@
 
 1. Прочитай `START_HERE_FOR_NEW_CHAT.md`.
 2. Затем прочитай:
-   - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+   - `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`
    - `docs/NEW_CHAT_CHECKPOINT_RU.md`
    - `docs/AGENT_CHECKPOINT_RU.md`
    - `docs/PROJECT_STATUS_RU.md`
    - `docs/FIRMWARE_IMPORT_CHECKPOINT_RU.md`
    - `docs/HARDWARE_MANIFEST_RU.md`
    - `docs/PIN_MAP_RU.md`
+   - `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`
 3. Если появятся новые рабочие подпапки, сначала читай их локальный `AGENTS.md`.
 
 ## Обязательный вход в новый чат
@@ -51,7 +52,7 @@
 
 - `GOSHA_FIRMWARE` живёт отдельно от `GOSHA_PLATFORM` и отдельно от `AI_ROBOT`.
 - Если непонятно, где сервер, где мобильный клиент и где голоса, сначала смотри:
-  - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+  - `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`
 - `GOSHA_FIRMWARE` — часть масштабируемого проекта `Гоша`:
   - много роботов;
   - много профилей ИИ-агентов;
@@ -59,17 +60,27 @@
   - без жёсткой привязки к одному облаку или одной модели.
 - Прошивку проектируй так, чтобы робот подключался к собственной платформе `Гоша`, а не к одному жёстко зашитому поставщику ИИ.
 - Для платы `gosha-v1` каноническая сборка профильных параметров идёт через:
-  - `python3 scripts/release.py gosha-v1 --name gosha-v1`
+  - `GOSHA_OTA_URL='<owner-only production endpoint>' python3 scripts/release.py gosha-v1 --name gosha-v1`
+  Значение обязательно, не печатается скриптом и не хранится в Git. Адрес
+  `TEMP_NL_RELAY` нельзя передавать как production-default.
   Обычный `idf.py build` не считается достаточным подтверждением для параметров из `boards/gosha-v1/config.json`.
 - `AI_ROBOT` разрешён только как источник одноразового импорта и справочных данных. Нельзя превращать его в живую зависимость нового репозитория.
 - До подтверждённого аппаратного манифеста и pin map не делай рискованные изменения выводов, питания, аудио и приводов.
 - Не коммить build-артефакты, локальные `sdkconfig`, временные двоичные файлы и рабочий мусор.
 
+## Текущая контрольная точка
+
+- Draft PR `#24`, ветка `feature/firmware-orange-eyes`, проверенный code head `7751a3ca326174d217536f6a8de7c09433c3e955`.
+- Immutable AI Office review `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом `GPT-5.5 / xhigh` дал terminal `PASS` без P0/P1/P2.
+- Статический gate закрыт, PR остаётся Draft/Open. Неисправная левая серва
+  физически отключена; с `2026-09-03` USB/serial, flash, перезагрузка, motion и
+  trim разрешены по `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`.
+
 ## Правила веток и `git worktree`
 
 - Для параллельных направлений по прошивке используй отдельные рабочие деревья `git worktree`, а не одну общую рабочую копию.
 - Канонический путь ручных рабочих деревьев разработчика:
-  - `/home/max/worktrees/gosha/<контур>-<задача>`
+  - `<TASK_WORKTREE>`
 - Для новых ручных задач в `GOSHA_FIRMWARE` базой по умолчанию считай `main`.
 - Для ручных рабочих веток используй такие префиксы:
   - `feature/` — продуктовая функция

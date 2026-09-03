@@ -5,6 +5,7 @@ import zipfile
 import argparse
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
 # Switch to project root directory
 os.chdir(Path(__file__).resolve().parent.parent)
@@ -166,6 +167,37 @@ def _apply_auto_selects(sdkconfig_append: list[str]) -> list[str]:
 
     return items
 
+
+def _required_env_sdkconfig(build: dict) -> tuple[list[str], set[str]]:
+    """Resolve owner-only build values without storing or printing them."""
+    entries: list[str] = []
+    redacted_keys: set[str] = set()
+    for spec in build.get("required_env_sdkconfig", []):
+        env_name = str(spec.get("env", "")).strip()
+        config_key = str(spec.get("config", "")).strip()
+        value_kind = str(spec.get("kind", "string")).strip()
+        if not env_name or not config_key.startswith("CONFIG_"):
+            raise ValueError("required_env_sdkconfig requires env and CONFIG_* fields")
+
+        value = os.environ.get(env_name, "").strip()
+        if not value:
+            print(f"[ERROR] Required owner-only environment variable is not set: {env_name}", file=sys.stderr)
+            sys.exit(2)
+        if value_kind == "url":
+            parsed = urlsplit(value)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                print(f"[ERROR] {env_name} must be an absolute HTTP(S) URL", file=sys.stderr)
+                sys.exit(2)
+            if parsed.username is not None or parsed.password is not None:
+                print(f"[ERROR] {env_name} must not contain embedded credentials", file=sys.stderr)
+                sys.exit(2)
+
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        entries.append(f'{config_key}="{escaped}"')
+        if bool(spec.get("redact", True)):
+            redacted_keys.add(config_key)
+    return entries, redacted_keys
+
 ################################################################################
 # Check board_type in CMakeLists
 ################################################################################
@@ -215,7 +247,9 @@ def release(board_type: str, config_filename: str = "config.json", *, filter_nam
 
         if board_leaf not in name:
             raise ValueError(f"build.name {name} 必须包含 {board_leaf}")
-        
+
+        owner_entries, redacted_keys = _required_env_sdkconfig(build)
+
         final_name = f"{manufacturer}-{name}" if manufacturer else name
         output_path = Path("releases") / f"v{project_version}_{final_name}.zip"
         if output_path.exists():
@@ -226,6 +260,7 @@ def release(board_type: str, config_filename: str = "config.json", *, filter_nam
         board_type_config = _find_board_config(board_type)
         sdkconfig_append = [f"{board_type_config}=y"]
         sdkconfig_append.extend(build.get("sdkconfig_append", []))
+        sdkconfig_append.extend(owner_entries)
         sdkconfig_append = _apply_auto_selects(sdkconfig_append)
 
         print("-" * 80)
@@ -234,7 +269,11 @@ def release(board_type: str, config_filename: str = "config.json", *, filter_nam
         if manufacturer:
             print(f"manufacturer: {manufacturer}")
         for item in sdkconfig_append:
-            print(f"sdkconfig_append: {item}")
+            key = item.split("=", 1)[0]
+            if key in redacted_keys:
+                print(f"sdkconfig_append: {key}=<owner-supplied>")
+            else:
+                print(f"sdkconfig_append: {item}")
 
         os.environ.pop("IDF_TARGET", None)
 

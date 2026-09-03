@@ -4,6 +4,14 @@
         {
             "name": "gosha-v1",
             "board_name": "GOSHA",
+            "required_env_sdkconfig": [
+                {
+                    "env": "GOSHA_OTA_URL",
+                    "config": "CONFIG_OTA_URL",
+                    "kind": "url",
+                    "redact": true
+                }
+            ],
             "sdkconfig_append": [
                 "CONFIG_LANGUAGE_RU_RU=y",
                 "CONFIG_USE_CUSTOM_WAKE_WORD=y",

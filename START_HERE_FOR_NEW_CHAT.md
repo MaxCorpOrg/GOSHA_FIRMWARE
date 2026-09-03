@@ -2,16 +2,44 @@
 
 Короткий вход для следующего агента в `GOSHA_FIRMWARE`.
 
+## Самая свежая аппаратная точка
+
+- `2026-08-27` статический remediation-gate ветки `feature/firmware-orange-eyes` опубликован в Draft PR `#24` на `7751a3ca326174d217536f6a8de7c09433c3e955`: hardcoded relay удалён из OTA-default и документации, production-сборка требует owner-only `GOSHA_OTA_URL`, а вывод значения редактируется.
+- Удалены чувствительные значения из Wi-Fi/activation-логов; `self.otto.stop` теперь только останавливает текущую задачу и очищает очередь, не ставя новый `ACTION_HOME`; vendored-компонент приведён к чистому `git diff --check`.
+- Каноническая статическая сборка с неразрешимым тестовым endpoint `.invalid` прошла: `gosha.bin` — `3652384` байт, свободно 12% app-раздела. Этот артефакт не предназначен для установки.
+- Immutable AI Office task `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом профиле `GPT-5.5 / xhigh` дала terminal `PASS`: P0/P1/P2 нет, точный remote/PR head подтверждён. Служебный upstream symlink удалён, а snapshot с исходниками и документацией принят secure exporter.
+- Статический firmware gate закрыт. Неисправная левая серва физически
+  отключена; с `2026-09-03` USB/serial, flash, перезагрузка, motion и trim
+  разрешены по `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`. Draft PR не сливать
+  без общей проверки.
+
+## Предыдущая аппаратная точка 2026-08-25
+
+- `2026-08-25` временный сетевой канал принят как рабочий обход: `TEMP_NL_RELAY` временно прокидывает роботу путь к `PRIMARY_PLATFORM_SERVER`, а не заменяет основной сервер.
+- Роли портов фиксируются логическими именами без IP-адресов, секретов и хардкода в прошивке: `18876` — HTTP-контур панели, OTA и config; `18080` — голосовой `WebSocket` и совместимый `MCP`.
+- В конце месяца канал нужно перенести с `TEMP_NL_RELAY` на `FUTURE_PRODUCTION_SERVER`, после чего повторить короткую сетевую проверку.
+- Новый физический робот подтверждён как `gosha-main`: Android показывает `Гоша Main`, робот разговаривает, голосовой сценарий принят.
+- Firmware quality gate на `feature/firmware-orange-eyes @ 07d5f6658b6c70c81626ebcc3fbee930ced94fc6`: Draft PR допустим, но merge и установка пока `NO-GO`. Причины: в старых документах `self.otto.stop` был указан как безопасная проверка, хотя он запускает возврат в `Home`; `git diff --check` падает на хвостовых пробелах в vendored-компоненте; существующий release ZIP содержит устаревший merged-образ.
+- `2026-08-23` новый робот после полной резервной копии переведён с несовместимой заводской разметки на полный образ `gosha-v1` из `feature/firmware-orange-eyes @ 80310104e895d02d648364460e82d0c2b31e8ba8`.
+- Запись, отдельный `verify_flash` и первый контролируемый запуск успешны.
+- Прошивка стабильна; левый канал `GPIO8` подтверждён перекрёстным тестом.
+- Физический сервопривод левой руки отключён от платы и должен оставаться
+  отключённым до замены. Прошивка, движения, `set_trim`, servo sequence и
+  осознанные проверки локального `:8080` разрешены по аппаратной политике.
+- Ближайший шаг — создать отдельную рабочую ветку, собрать новый кандидат,
+  подготовить rollback, установить его и снять serial/hardware evidence.
+
 ## Сначала прочитать
 
 1. `AGENTS.md`
-2. `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+2. `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`
 3. `docs/NEW_CHAT_CHECKPOINT_RU.md`
 4. `docs/AGENT_CHECKPOINT_RU.md`
 5. `docs/PROJECT_STATUS_RU.md`
 6. `docs/FIRMWARE_IMPORT_CHECKPOINT_RU.md`
 7. `docs/HARDWARE_MANIFEST_RU.md`
 8. `docs/PIN_MAP_RU.md`
+9. `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`
 
 ## Как писать новые записи
 
@@ -37,18 +65,18 @@
 - `GOSHA_FIRMWARE` — отдельный репозиторий собственной прошивки `Гоша`.
 - Репозиторий не должен становиться продолжением `AI_ROBOT`; `AI_ROBOT` используется только как источник одноразового импорта и справки.
 - Исходная база уже импортирована в:
-  - `/home/max/GOSHA_FIRMWARE/firmware`
+  - `<FIRMWARE_WORKSPACE>/firmware`
 - Первая целевая плата:
   - `gosha-v1`
   - на основе `otto-robot`
 - Рабочая локальная среда сборки уже поднята:
-  - `/home/max/esp/esp-idf-v5.5.2`
+  - `<ESP_IDF_ROOT>`
 - Первый merged-образ уже собран:
-  - `/home/max/GOSHA_FIRMWARE/firmware/build/merged-binary.bin`
+  - `firmware/build/merged-binary.bin`
 - Прошивка проектируется как часть масштабируемой платформы `Гоша`:
   - много роботов;
   - много профилей ИИ-агентов;
   - много OpenAI-совместимых провайдеров на стороне платформы;
   - без жёсткой привязки к одному облаку или одной модели.
 - Если нужно быстро понять, где серверный голос, панель и мобильный клиент, смотри:
-  - `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+  - `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`

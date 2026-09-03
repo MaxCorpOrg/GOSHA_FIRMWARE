@@ -4,10 +4,10 @@
 
 ## Перед работой прочитать
 
-1. `/home/max/GOSHA_FIRMWARE/AGENTS.md`
-2. `/home/max/GOSHA_FIRMWARE/docs/PROJECT_STATUS_RU.md`
-3. `/home/max/GOSHA_FIRMWARE/docs/HARDWARE_MANIFEST_RU.md`
-4. `/home/max/GOSHA_FIRMWARE/docs/PIN_MAP_RU.md`
+1. `<FIRMWARE_WORKSPACE>/AGENTS.md`
+2. `<FIRMWARE_WORKSPACE>/docs/PROJECT_STATUS_RU.md`
+3. `<FIRMWARE_WORKSPACE>/docs/HARDWARE_MANIFEST_RU.md`
+4. `<FIRMWARE_WORKSPACE>/docs/PIN_MAP_RU.md`
 
 ## Что здесь менять
 
@@ -27,12 +27,28 @@
 ## Главные правила
 
 - Не менять выводы, питание, аудио и приводы без сверки с аппаратным манифестом и pin map.
+- Физический сервопривод левой руки отключён от платы и не должен подключаться
+  обратно до ремонта. Команды движения, servo sequence, `self.otto.set_trim`,
+  USB/serial и установка образа разрешены по
+  `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`.
+- Статический firmware gate Draft PR `#24` на `7751a3ca326174d217536f6a8de7c09433c3e955` получил terminal `PASS` GPT-5.5/xhigh без P0/P1/P2; новые аппаратные изменения выполнять в отдельной ветке с новым evidence.
+- Не пытаться компенсировать неисправную серву программной подстройкой и не подталкивать её под питанием.
+- Не публиковать MAC-адреса тестовых роботов, уникальные хвосты имён точек доступа и локальные резервные образы.
 - Если правка влияет на слово пробуждения, звук, экран или локальный портал, это обязательно фиксировать в документации.
+- Единый экранный оттенок `gosha-v1` задаётся параметром `GOSHA_UI_ACCENT_COLOR_HEX` в `firmware/main/CMakeLists.txt`. Он одновременно передаётся сборщику GIF-глаз и коду приборных индикаторов.
+- Постоянный экранный профиль платы: глаза и обычные индикаторы имеют один акцентный цвет, фон остаётся чистым чёрным, критическое предупреждение низкого заряда остаётся красным.
+- Не править GIF-файлы внутри `managed_components/` вручную: это внешняя, неотслеживаемая зависимость.
+- После изменения экранного оттенка обязательно:
+  - проверить все 21 GIF-эмоции с сохранением размеров, кадров и задержек;
+  - выполнить каноническую сборку `GOSHA_OTA_URL='<owner-only production endpoint>' python3 scripts/release.py gosha-v1 --name gosha-v1`; значение не хранить в Git и не выводить в отчёт;
+  - если менялись код интерфейса и ресурсы, устанавливать только согласованную пару `gosha.bin` в раздел приложения и `generated_assets.bin` в раздел ресурсов;
+  - не использовать полный набор `flash_args` или объединённый образ, если задача не требует менять NVS, `otadata`, таблицу разделов и загрузчик;
+  - помнить, что этот раздел содержит также модель и метаданные слова пробуждения, поэтому ресурс нельзя переносить на произвольную старую прошивку.
 - После значимой правки обновлять:
-  - `/home/max/GOSHA_FIRMWARE/docs/PROJECT_STATUS_RU.md`
-  - `/home/max/GOSHA_FIRMWARE/docs/AGENT_CHECKPOINT_RU.md`
-  - `/home/max/GOSHA_FIRMWARE/docs/HARDWARE_MANIFEST_RU.md`, если изменилась реальная аппаратная конфигурация
-  - `/home/max/GOSHA_FIRMWARE/docs/PIN_MAP_RU.md`, если изменились или подтвердились выводы
+  - `<FIRMWARE_WORKSPACE>/docs/PROJECT_STATUS_RU.md`
+  - `<FIRMWARE_WORKSPACE>/docs/AGENT_CHECKPOINT_RU.md`
+  - `<FIRMWARE_WORKSPACE>/docs/HARDWARE_MANIFEST_RU.md`, если изменилась реальная аппаратная конфигурация
+  - `<FIRMWARE_WORKSPACE>/docs/PIN_MAP_RU.md`, если изменились или подтвердились выводы
 
 ## Язык и формат
 

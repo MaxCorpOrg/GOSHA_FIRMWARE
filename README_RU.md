@@ -14,32 +14,37 @@
 
 Если новый чат должен быстро понять, где платформа, серверный голос, мобильный клиент и прошивка, сначала открой:
 
-- `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`
+- `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`
 
 ## Текущее состояние
 
 - Репозиторий создан локально как отдельная стартовая точка.
 - Исходная база уже импортирована в отдельный сборочный корень:
-  - `/home/max/GOSHA_FIRMWARE/firmware`
+  - `<FIRMWARE_WORKSPACE>/firmware`
 - Каноническая исходная база для первого импорта уже зафиксирована:
-  - `/home/max/MAX_CORP_CORE/AI_ROBOT/xiaozhi-esp32`
+  - `<LEGACY_FIRMWARE_SOURCE>`
 - Канонический эталон для сравнения и отката уже зафиксирован:
-  - `/home/max/MAX_CORP_CORE/AI_ROBOT/new/v2.0.5_otto-robot/merged-binary.bin`
+  - `<LEGACY_FIRMWARE_ARTIFACT>`
 - Собственный профиль `gosha-v1` уже создан как копия `otto-robot`.
 - Профиль уже виден в `scripts/release.py --list-boards`.
 - Рабочее окружение сборки уже поднято:
   - `ESP-IDF 5.5.2`
-  - путь: `/home/max/esp/esp-idf-v5.5.2`
+  - путь: `<ESP_IDF_ROOT>`
+- Production-сборка `gosha-v1` требует owner-only переменную `GOSHA_OTA_URL`;
+  скрипт передаёт её в `CONFIG_OTA_URL`, но не печатает значение и не хранит его в Git.
+- Статический firmware gate Draft PR `#24` на `7751a3ca326174d217536f6a8de7c09433c3e955`
+  получил terminal `PASS` AI Office на фактическом `GPT-5.5 / xhigh` без P0/P1/P2.
+  PR остаётся Draft/Open; собранный с `.invalid` endpoint артефакт не предназначен для установки.
 - Первая полная сборка уже выполнена успешно.
 - Получены первые артефакты:
-  - `/home/max/GOSHA_FIRMWARE/firmware/build/merged-binary.bin`
-  - `/home/max/GOSHA_FIRMWARE/firmware/build/gosha.bin`
-  - `/home/max/GOSHA_FIRMWARE/firmware/releases/v2.2.2_gosha-v1.zip`
+  - `firmware/build/merged-binary.bin`
+  - `firmware/build/gosha.bin`
+  - `firmware/releases/v2.2.2_gosha-v1.zip`
 - Первое тестовое устройство уже прошито и дошло до режима настройки сети.
 - Во внешнем продуктовом слое уже начат переход на бренд `GOSHA`:
   - имя сборки теперь `gosha`
   - язык по умолчанию переключён на русский
-  - OTA по умолчанию идёт на `http://151.241.228.232:18876/gosha/ota/`
+  - OTA/config-маршрут задаётся владельцем через `GOSHA_OTA_URL` при сборке или через runtime-настройку `wifi/ota_url`; адрес временного relay не хранится в Git и не должен передаваться как production-default
   - имя точки доступа переведено на семейство `GOSHA-A-<хвост MAC>`
   - имя настройки по Bluetooth переведено на `GOSHA-Setup`
   - имя платы для пользователя переведено на `GOSHA`
@@ -65,7 +70,7 @@
 ## С чего начинать следующий этап
 
 1. Открыть `START_HERE_FOR_NEW_CHAT.md`.
-2. Прочитать `/home/max/GOSHA_PLATFORM/docs/GOSHA_PROJECT_MAP_RU.md`.
+2. Прочитать `<PLATFORM_WORKSPACE>/docs/GOSHA_PROJECT_MAP_RU.md`.
 3. Прочитать `docs/FIRMWARE_IMPORT_CHECKPOINT_RU.md`.
 4. Подтвердить аппаратный манифест и pin map.
 5. Проверить аппаратный манифест и pin map.
