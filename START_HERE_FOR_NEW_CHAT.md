@@ -4,9 +4,12 @@
 
 ## Самая свежая аппаратная точка
 
-- Текущий Draft PR `#33` находится на
-  `565c4213a1a5dea16193faca0458daea250103f7`; это docs-follow-up поверх уже
-  установленного app-only кандидата. Новый flash для этого docs head не
+- Фактический текущий head Draft PR `#33` не фиксируется в этом файле:
+  перед работой проверяй его через
+  `gh pr view 33 --repo MaxCorpOrg/GOSHA_FIRMWARE --json headRefOid`.
+- Первый docs-policy follow-up этой ветки:
+  `565c4213a1a5dea16193faca0458daea250103f7`; это lineage документации поверх
+  уже установленного app-only кандидата. Новый flash для docs-only head не
   выполнялся и не требуется.
 - `2026-09-03` из `codex/noncamera-pinmap-ledc-fix-20260903 @
   c81d24c941be8cadd6a96c9bbddd2884bf5906ae` выполнена свежая canonical

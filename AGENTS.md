@@ -71,9 +71,14 @@
 ## Текущая контрольная точка
 
 - `2026-09-03`: Draft PR `#33`, ветка
-  `codex/noncamera-pinmap-ledc-fix-20260903`, текущий head
-  `565c4213a1a5dea16193faca0458daea250103f7`, base
+  `codex/noncamera-pinmap-ledc-fix-20260903`, base
   `codex/hardware-development-enabled-20260903`, остаётся Draft/Open.
+  Фактический текущий head не фиксировать в этой ветке как источник истины:
+  перед работой проверять его через
+  `gh pr view 33 --repo MaxCorpOrg/GOSHA_FIRMWARE --json headRefOid`.
+- Первый docs-policy follow-up этой ветки:
+  `565c4213a1a5dea16193faca0458daea250103f7`; это lineage документации, а не
+  прошитый build.
 - В этом PR правый канал руки оставлен на `GPIO12`, non-camera
   `display_cs_pin` отключён через `GPIO_NUM_NC`, повторный `AttachServos()`
   убран из `ActionTask`, а static guard проверяет дубли активных non-NC GPIO.
