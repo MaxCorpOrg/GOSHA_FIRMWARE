@@ -73,8 +73,9 @@
 - Draft PR `#24`, ветка `feature/firmware-orange-eyes`, проверенный code head `7751a3ca326174d217536f6a8de7c09433c3e955`.
 - Immutable AI Office review `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом `GPT-5.5 / xhigh` дал terminal `PASS` без P0/P1/P2.
 - Статический gate закрыт, PR остаётся Draft/Open. Неисправная левая серва
-  физически отключена; с `2026-09-03` USB/serial, flash, перезагрузка, motion и
-  trim разрешены по `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`.
+  физически отключена; с `2026-09-03` USB/serial, flash, power-cycle и
+  перезагрузка разрешены по `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`. Motion,
+  `Home`, `set_trim` и servo sequence требуют отдельной явной команды владельца.
 
 ## Правила веток и `git worktree`
 
