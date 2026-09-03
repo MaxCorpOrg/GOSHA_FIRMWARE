@@ -134,7 +134,7 @@ constexpr HardwareConfig NON_CAMERA_VERSION_CONFIG = {
     .display_clk_pin = GPIO_NUM_9,
     .display_dc_pin = GPIO_NUM_46,
     .display_rst_pin = GPIO_NUM_11,
-    .display_cs_pin = GPIO_NUM_12,
+    .display_cs_pin = GPIO_NUM_NC,
 
     .i2c_sda_pin = GPIO_NUM_NC,
     .i2c_scl_pin = GPIO_NUM_NC,

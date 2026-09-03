@@ -4,6 +4,18 @@
 > `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`. Неисправная левая серва физически
 > отключена; прежние запреты в исторических разделах ниже больше не действуют.
 
+## Локальная pin map/LEDC правка 2026-09-03
+
+- В ветке `codex/noncamera-pinmap-ledc-fix-20260903` от `70a9884` для
+  `gosha-v1` убран программный конфликт non-camera pin map: правая рука
+  остаётся на `GPIO12`, а `display_cs_pin` переведён в `GPIO_NUM_NC`.
+- Из `ActionTask` удалён только повторный `AttachServos()`: первичный
+  `Otto::Init()` и boot `ACTION_HOME` не изменены. Добавлен статический guard
+  `firmware/scripts/check_gosha_v1_pinmap.py`, который ловит дубли активных
+  non-NC GPIO и игнорирует намеренные `GPIO_NUM_NC`.
+- Это статическая правка без USB/serial/flash/reboot/motion. Физическая
+  пригодность остальных `LEDC`-выводов остаётся отдельным аппаратным риском.
+
 ## Живая установка hardening-кандидата 2026-09-03
 
 - Из `codex/hardware-development-enabled-20260903 @ e3fa25c0e55a`, чей
@@ -25,10 +37,9 @@
   panic/watchdog/reset loop. Внешние motion-команды не отправлялись.
 - Тёплые интервалы ASR-to-first-TTS: `1.990 s` и `1.280 s`; холодный wake до
   WebSocket session — `2.620 s`, до первого TTS — `7.200 s`. Предупреждение
-  server/device sample rate `16000/24000` остаётся хвостом. LEDC reservation
-  warnings объяснены повторным Attach и не требуют отката, но non-camera
-  config делит `GPIO12` между правой рукой и `display_cs`; pin map требует
-  отдельного физического подтверждения или исправления.
+  server/device sample rate `16000/24000` остаётся хвостом. Найденные причины
+  LEDC reservation warnings вынесены в отдельную локальную правку выше; этот
+  установленный live-кандидат ещё содержит прежний код.
 
 ## Локальный hardening URL/AFSK 2026-08-28
 

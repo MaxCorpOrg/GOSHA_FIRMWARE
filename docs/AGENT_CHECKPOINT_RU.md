@@ -6,6 +6,15 @@
 > servo sequence требуют отдельной явной команды владельца. Более ранние
 > запреты ниже сохраняют только историю соответствующих проверок.
 
+## Локальная pin map/LEDC правка 2026-09-03
+
+- Ветка `codex/noncamera-pinmap-ledc-fix-20260903` от `70a9884` сохраняет
+  правую руку на `GPIO12`, отключает `display_cs_pin` через `GPIO_NUM_NC` и
+  добавляет статический guard дублей активных non-NC GPIO для `gosha-v1`.
+- Из `ActionTask` удалён повторный `AttachServos()`. `Otto::Init()` и boot
+  `ACTION_HOME` не менялись. Робот, USB/serial, flash, reboot и motion не
+  использовались.
+
 ## Живая установка 2026-09-03
 
 - `codex/hardware-development-enabled-20260903 @ e3fa25c0e55a` содержит
@@ -16,9 +25,9 @@
 - Boot/network/WebSocket/read-only identity/wake/voice smoke прошёл без
   panic/watchdog/reset loop. Motion-команды не отправлялись.
 - Тёплый ASR-to-first-TTS измерен как `1.990 s` и `1.280 s`; холодный первый
-  turn — `7.200 s`. Sample-rate warning остаётся хвостом; LEDC warnings
-  объяснены повторным Attach, но пересечение `GPIO12` правой руки и
-  `display_cs` требует отдельного подтверждения pin map.
+  turn — `7.200 s`. Sample-rate warning остаётся хвостом. Повторный Attach и
+  пересечение `GPIO12` правой руки с `display_cs` закрываются локальной
+  статической правкой выше; live-кандидат из этого раздела не менялся.
 
 ## Локальная контрольная точка hardening 2026-08-28
 

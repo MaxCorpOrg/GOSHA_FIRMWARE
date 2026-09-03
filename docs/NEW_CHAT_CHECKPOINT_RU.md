@@ -4,6 +4,15 @@
 > `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`; прежние запреты ниже являются
 > историческими.
 
+## Локальная pin map/LEDC правка 2026-09-03
+
+- Ветка `codex/noncamera-pinmap-ledc-fix-20260903` от `70a9884` убирает
+  конфликт `GPIO12`: `right_hand_pin` остаётся `GPIO_NUM_12`, а
+  `display_cs_pin` в `NON_CAMERA_VERSION_CONFIG` становится `GPIO_NUM_NC`.
+- Повторный `AttachServos()` удалён только из `ActionTask`; `Otto::Init()` и
+  boot `ACTION_HOME` сохранены. Новый статический guard
+  `firmware/scripts/check_gosha_v1_pinmap.py` ловит дубли активных non-NC GPIO.
+
 ## Живая точка 2026-09-03
 
 - Ветка `codex/hardware-development-enabled-20260903 @ e3fa25c0e55a`
@@ -23,9 +32,8 @@
 - После прогрева ASR-to-first-TTS составил `1.990 s` и `1.280 s`. Холодный
   WebSocket setup после wake занял `2.620 s`, первый холодный turn до TTS —
   `7.200 s`. Предупреждение `16000/24000` sample-rate остаётся хвостом. LEDC
-  warnings вызваны повторным Attach и не требуют отката, но пересечение
-  `GPIO12` правой руки с `display_cs` в non-camera config требует отдельного
-  подтверждения pin map.
+  warnings и конфликт `GPIO12` закрываются локальной статической правкой выше;
+  live-кандидат из этого раздела ещё был собран до неё.
 
 ## Локальная точка 2026-08-28
 
