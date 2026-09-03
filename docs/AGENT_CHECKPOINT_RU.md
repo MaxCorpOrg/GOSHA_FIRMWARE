@@ -16,7 +16,9 @@
 - Boot/network/WebSocket/read-only identity/wake/voice smoke прошёл без
   panic/watchdog/reset loop. Motion-команды не отправлялись.
 - Тёплый ASR-to-first-TTS измерен как `1.990 s` и `1.280 s`; холодный первый
-  turn — `7.200 s`. Sample-rate и LEDC warnings оставлены отдельным хвостом.
+  turn — `7.200 s`. Sample-rate warning остаётся хвостом; LEDC warnings
+  объяснены повторным Attach, но пересечение `GPIO12` правой руки и
+  `display_cs` требует отдельного подтверждения pin map.
 
 ## Локальная контрольная точка hardening 2026-08-28
 

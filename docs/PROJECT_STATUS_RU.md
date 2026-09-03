@@ -24,9 +24,11 @@
   read-only identity, threshold `0.380000`, wake word и голосовой диалог без
   panic/watchdog/reset loop. Внешние motion-команды не отправлялись.
 - Тёплые интервалы ASR-to-first-TTS: `1.990 s` и `1.280 s`; холодный wake до
-  WebSocket session — `2.620 s`, до первого TTS — `7.200 s`. Отдельно
-  исследовать предупреждения server/device sample rate `16000/24000` и LEDC
-  reservation warnings на servo GPIO.
+  WebSocket session — `2.620 s`, до первого TTS — `7.200 s`. Предупреждение
+  server/device sample rate `16000/24000` остаётся хвостом. LEDC reservation
+  warnings объяснены повторным Attach и не требуют отката, но non-camera
+  config делит `GPIO12` между правой рукой и `display_cs`; pin map требует
+  отдельного физического подтверждения или исправления.
 
 ## Локальный hardening URL/AFSK 2026-08-28
 
