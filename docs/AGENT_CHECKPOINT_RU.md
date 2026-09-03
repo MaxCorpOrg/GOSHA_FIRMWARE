@@ -6,6 +6,18 @@
 > servo sequence требуют отдельной явной команды владельца. Более ранние
 > запреты ниже сохраняют только историю соответствующих проверок.
 
+## Живая установка 2026-09-03
+
+- `codex/hardware-development-enabled-20260903 @ e3fa25c0e55a` содержит
+  актуальную аппаратную политику поверх продуктового кода `a8326d6818cb1e`.
+- Выполнены полный 16-MB backup, свежая canonical сборка `gosha-v1`, app-only
+  flash `0x20000` и отдельный `verify_flash`; NVS/bootloader/partition
+  table/assets сохранены.
+- Boot/network/WebSocket/read-only identity/wake/voice smoke прошёл без
+  panic/watchdog/reset loop. Motion-команды не отправлялись.
+- Тёплый ASR-to-first-TTS измерен как `1.990 s` и `1.280 s`; холодный первый
+  turn — `7.200 s`. Sample-rate и LEDC warnings оставлены отдельным хвостом.
+
 ## Локальная контрольная точка hardening 2026-08-28
 
 - Ветка `codex/firmware-log-hardening-20260828` от `28eb7584aaeef0cb66aa3c967bf4a162f49b3d0b` добавляет защиту диагностических URL-логов и AFSK-настройки `Wi-Fi`.

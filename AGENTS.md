@@ -70,6 +70,16 @@
 
 ## Текущая контрольная точка
 
+- `2026-09-03`: ветка `codex/hardware-development-enabled-20260903` на
+  `e3fa25c0e55a` содержит только актуализацию аппаратной политики поверх
+  продуктового кода `a8326d6818cb1ed72db8a5cc00c00b5366f270b8`.
+- Свежий canonical `gosha-v1` build прошёл; `gosha.bin` размером `3654384`
+  байт установлен только в app-раздел `0x20000` после полного 16-MB backup.
+  Write hash и отдельный `verify_flash` прошли; NVS, `otadata`, bootloader,
+  partition table и assets сохранены.
+- Живой smoke подтвердил стабильную загрузку, Wi-Fi, platform/OTA/runtime
+  events, локальный WebSocket, read-only identity, wake word и голосовой
+  диалог без panic/watchdog/reset loop. Внешние motion-команды не отправлялись.
 - Draft PR `#24`, ветка `feature/firmware-orange-eyes`, проверенный code head `7751a3ca326174d217536f6a8de7c09433c3e955`.
 - Immutable AI Office review `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом `GPT-5.5 / xhigh` дал terminal `PASS` без P0/P1/P2.
 - Статический gate закрыт, PR остаётся Draft/Open. Неисправная левая серва

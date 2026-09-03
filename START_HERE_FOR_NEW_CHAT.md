@@ -4,6 +4,22 @@
 
 ## Самая свежая аппаратная точка
 
+- `2026-09-03` из `codex/hardware-development-enabled-20260903 @ e3fa25c0e55a`
+  выполнена свежая canonical сборка `gosha-v1`; продуктовый код соответствует
+  статически принятому `a8326d6818cb1ed72db8a5cc00c00b5366f270b8`.
+- Перед записью снят полный 16-MB backup вне Git с правами `600`. Новый
+  `gosha.bin` (`3654384` байт) записан только по `0x20000`; NVS, `otadata`,
+  bootloader, partition table и совпадающие assets не изменялись. Write hash и
+  отдельный `verify_flash` прошли.
+- Live smoke подтвердил загрузку `gosha 2.2.2` / ESP-IDF `5.5.2`, 8 MB PSRAM,
+  non-camera, Wi-Fi, platform/OTA/runtime events, `:8080/ws`, read-only
+  `gosha.identity.get/result`, threshold `0.380000`, wake word и голосовой
+  диалог без panic/watchdog/reset loop.
+- После прогрева измерено `1.990 s` и `1.280 s` от готового ASR-текста до
+  первого TTS-текста. Холодный старт WebSocket после wake занял `2.620 s`, а
+  первый полный turn до TTS — `7.200 s`. Остались предупреждение о
+  `16000/24000` sample-rate и LEDC warnings на servo GPIO; изучать отдельно,
+  без motion-команд.
 - `2026-08-27` статический remediation-gate ветки `feature/firmware-orange-eyes` опубликован в Draft PR `#24` на `7751a3ca326174d217536f6a8de7c09433c3e955`: hardcoded relay удалён из OTA-default и документации, production-сборка требует owner-only `GOSHA_OTA_URL`, а вывод значения редактируется.
 - Удалены чувствительные значения из Wi-Fi/activation-логов; `self.otto.stop` теперь только останавливает текущую задачу и очищает очередь, не ставя новый `ACTION_HOME`; vendored-компонент приведён к чистому `git diff --check`.
 - Каноническая статическая сборка с неразрешимым тестовым endpoint `.invalid` прошла: `gosha.bin` — `3652384` байт, свободно 12% app-раздела. Этот артефакт не предназначен для установки.

@@ -4,6 +4,27 @@
 > `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`; прежние запреты ниже являются
 > историческими.
 
+## Живая точка 2026-09-03
+
+- Ветка `codex/hardware-development-enabled-20260903 @ e3fa25c0e55a`
+  фиксирует аппаратную политику поверх продуктового кода
+  `a8326d6818cb1ed72db8a5cc00c00b5366f270b8`.
+- Свежая canonical сборка `gosha-v1` прошла: `gosha.bin` — `3654384` байт,
+  свободно 11% app-раздела. Host test redaction, static logging guard и
+  `git diff --check` прошли.
+- До записи сохранён полный 16-MB backup вне Git с mode `600`. Приложение
+  записано только по `0x20000`; assets уже совпадали с кандидатом, поэтому NVS,
+  `otadata`, bootloader, partition table и assets не менялись. Write hash и
+  отдельный `verify_flash` успешны.
+- Live smoke подтвердил `gosha 2.2.2`, ESP-IDF `5.5.2`, 8 MB PSRAM,
+  non-camera, Wi-Fi, OTA/config, runtime events, локальный WebSocket,
+  read-only identity, wake word и голосовой диалог. Panic, watchdog и reset
+  loop не наблюдались; motion-capable MCP tools не вызывались.
+- После прогрева ASR-to-first-TTS составил `1.990 s` и `1.280 s`. Холодный
+  WebSocket setup после wake занял `2.620 s`, первый холодный turn до TTS —
+  `7.200 s`. Предупреждения `16000/24000` sample-rate и LEDC на servo GPIO
+  требуют отдельного анализа.
+
 ## Локальная точка 2026-08-28
 
 - Ветка `codex/firmware-log-hardening-20260828` от `28eb7584aaeef0cb66aa3c967bf4a162f49b3d0b` добавляет защиту URL/AFSK-диагностики: в логи, экранные сообщения и ошибки не должны попадать `userinfo`, host/IP, port, path, query, fragment, token и полный SSID/password text.

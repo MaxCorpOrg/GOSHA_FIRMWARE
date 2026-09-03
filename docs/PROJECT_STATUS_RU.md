@@ -4,6 +4,30 @@
 > `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`. Неисправная левая серва физически
 > отключена; прежние запреты в исторических разделах ниже больше не действуют.
 
+## Живая установка hardening-кандидата 2026-09-03
+
+- Из `codex/hardware-development-enabled-20260903 @ e3fa25c0e55a`, чей
+  продуктовый код соответствует `a8326d6818cb1ed72db8a5cc00c00b5366f270b8`,
+  собран свежий canonical кандидат `gosha-v1` на ESP-IDF `5.5.2`.
+- `gosha.bin` размером `3654384` байт и SHA-256
+  `78fe6c115a44fa4e9f40b0e990c3e6162e1acfc8cdac5ff1b10ed1bf628d5764`
+  прошёл host/static checks и сохранил 11% app-раздела.
+- Перед записью снят полный 16-MB backup в owner-only `local_only`, mode `600`,
+  SHA-256
+  `c3dee211b4b66d49500447bfc9cf66d97e7ec65f9d631da76ecb0c13249d594a`.
+  Таблица разделов совпала с ожидаемой.
+- Assets на устройстве побайтно совпали с новым `generated_assets.bin`,
+  поэтому записан только app-раздел `0x20000`. NVS, `otadata`, bootloader,
+  partition table и assets сохранены; write hash и отдельный `verify_flash`
+  успешны.
+- Live smoke подтвердил boot, Wi-Fi, platform/OTA/runtime events, `:8080/ws`,
+  read-only identity, threshold `0.380000`, wake word и голосовой диалог без
+  panic/watchdog/reset loop. Внешние motion-команды не отправлялись.
+- Тёплые интервалы ASR-to-first-TTS: `1.990 s` и `1.280 s`; холодный wake до
+  WebSocket session — `2.620 s`, до первого TTS — `7.200 s`. Отдельно
+  исследовать предупреждения server/device sample rate `16000/24000` и LEDC
+  reservation warnings на servo GPIO.
+
 ## Локальный hardening URL/AFSK 2026-08-28
 
 - Ветка `codex/firmware-log-hardening-20260828` от `28eb7584aaeef0cb66aa3c967bf4a162f49b3d0b` закрывает дополнительную статическую защиту диагностических сообщений. Сетевые адреса продолжают использоваться в коде для подключения, но в логи, экранные сообщения и ошибки теперь отдаётся только обезличенное описание URL: схема и список скрытых частей без значений `userinfo`, host/IP, port, path, query, fragment и token.
