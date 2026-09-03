@@ -25,7 +25,7 @@
 - Чувствительные Wi-Fi/activation-логи обезличены; HTTP-клиент не печатает `Authorization`. `runtime_events` применяется replace-whole и очищает старый endpoint/token при отсутствии полной секции. Vendored whitespace очищен, `git diff --check origin/main` проходит.
 - Неиспользуемый upstream symlink `_codeql_detected_source_root` удалён, поскольку secure workspace-export AI Office отклоняет symlink как `unsupported_git_entry` до запуска модели.
 - Каноническая сборка ESP-IDF 5.5.2 с неразрешимым тестовым `.invalid` endpoint прошла без flash: `gosha.bin` — `3652384` байт, свободно 12% app-раздела. Собранный ZIP — только статическое доказательство компиляции, устанавливать его нельзя.
-- Immutable AI Office task `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом `GPT-5.5 / xhigh` завершилась terminal `PASS` без P0/P1/P2 и подтвердила точный remote/PR head. Статический gate закрыт; PR остаётся Draft/Open без merge. Неисправная левая серва отдельно сохраняет запрет на flash, USB/serial, перезагрузку ради теста, motion и trim.
+- Immutable AI Office task `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом `GPT-5.5 / xhigh` завершилась terminal `PASS` без P0/P1/P2 и подтвердила точный remote/PR head. Статический gate закрыт; PR остаётся Draft/Open без merge. На `2026-09-03` владелец подтвердил, что левая серва физически отключена, поэтому flash, USB/serial и перезагрузка разрешены по аппаратной политике; motion и trim остаются отдельным механическим допуском.
 
 ## Контрольная точка нового робота 2026-08-25
 

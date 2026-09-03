@@ -28,7 +28,7 @@
 - `self.otto.stop` больше не ставит `ACTION_HOME`: он останавливает текущую задачу, возобновляет обновление батареи и очищает очередь без запуска нового движения.
 - `git diff --check origin/main` чист. Статическая сборка ESP-IDF 5.5.2 с неразрешимым тестовым endpoint `.invalid` прошла без flash: `gosha.bin` — `3652384` байт, свободно 12% app-раздела; ZIP является только доказательством сборки и не предназначен для установки.
 - Неиспользуемый upstream symlink `_codeql_detected_source_root` удалён: защищённый workspace-export AI Office запрещает symlink и до удаления завершался `unsupported_git_entry` ещё до запуска reviewer-модели.
-- Immutable AI Office review `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом `GPT-5.5 / xhigh` завершился terminal `PASS` без P0/P1/P2. Статический gate закрыт, однако PR остаётся Draft/Open и не сливается до общей последовательной приёмки. Из-за неисправной левой сервы flash, USB/serial, перезагрузка ради теста, motion и trim по-прежнему запрещены.
+- Immutable AI Office review `task-20260827T104756Z-immutable-terminal-firmware-pr-24-gate-at-7751a3c` на фактическом `GPT-5.5 / xhigh` завершился terminal `PASS` без P0/P1/P2. Статический gate закрыт, однако PR остаётся Draft/Open и не сливается до общей последовательной приёмки. На `2026-09-03` владелец подтвердил, что неисправная левая серва физически отключена, поэтому flash, USB/serial и перезагрузка разрешены по `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`; motion и trim остаются закрыты до отдельного аппаратного допуска.
 
 ## Предыдущая контрольная точка 2026-08-25
 
