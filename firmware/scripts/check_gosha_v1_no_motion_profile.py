@@ -13,9 +13,11 @@ KCONFIG = ROOT / "main/Kconfig.projbuild"
 OTTO_CONTROLLER = ROOT / "main/boards/gosha-v1/otto_controller.cc"
 OTTO_MOVEMENTS_CC = ROOT / "main/boards/gosha-v1/otto_movements.cc"
 OTTO_MOVEMENTS_H = ROOT / "main/boards/gosha-v1/otto_movements.h"
+MCP_SERVER = ROOT / "main/mcp_server.cc"
 RELEASE = ROOT / "scripts/release.py"
 
 NO_MOTION_FLAG = "CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y"
+UPGRADE_TOOL = '"self.upgrade_firmware"'
 
 DANGEROUS_TOOLS = (
     '"self.otto.action"',
@@ -62,9 +64,10 @@ def extract_body(source: str, pattern: str, name: str) -> str:
     return source[brace + 1 : pos - 1]
 
 
-def protected_intervals(source: str) -> list[tuple[int, int]]:
+def protected_intervals(source: str, guard_name: str = "kNoMotionSafeProfile") -> list[tuple[int, int]]:
     intervals: list[tuple[int, int]] = []
-    for match in re.finditer(r"if\s*\(\s*!kNoMotionSafeProfile\s*\)\s*\{", source):
+    pattern = rf"if\s*\(\s*!{re.escape(guard_name)}\s*\)\s*\{{"
+    for match in re.finditer(pattern, source):
         brace = source.find("{", match.end() - 1)
         depth = 1
         pos = brace + 1
@@ -74,7 +77,7 @@ def protected_intervals(source: str) -> list[tuple[int, int]]:
             elif source[pos] == "}":
                 depth -= 1
             pos += 1
-        require(depth == 0, "if (!kNoMotionSafeProfile) block was not closed")
+        require(depth == 0, f"if (!{guard_name}) block was not closed")
         intervals.append((brace, pos))
     return intervals
 
@@ -205,6 +208,44 @@ def validate_motion_entrypoints(controller: str) -> None:
         )
 
 
+def validate_firmware_upgrade_entrypoint(mcp_server: str) -> None:
+    require(
+        "#ifdef CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE" in mcp_server
+        and "constexpr bool kGoshaNoMotionSafeProfile = true;" in mcp_server
+        and "constexpr bool kGoshaNoMotionSafeProfile = false;" in mcp_server,
+        "MCP server must derive kGoshaNoMotionSafeProfile from CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE",
+    )
+
+    user_tools_body = extract_body(
+        mcp_server,
+        r"void\s+McpServer::AddUserOnlyTools\s*\([^)]*\)",
+        "McpServer::AddUserOnlyTools",
+    )
+    pos = user_tools_body.find(UPGRADE_TOOL)
+    require(pos >= 0, f"{UPGRADE_TOOL} was not found")
+    intervals = protected_intervals(user_tools_body, "kGoshaNoMotionSafeProfile")
+    require(
+        inside_any(pos, intervals),
+        f"{UPGRADE_TOOL} must be registered only inside if (!kGoshaNoMotionSafeProfile)",
+    )
+
+    call_body = extract_body(
+        mcp_server,
+        r"void\s+McpServer::DoToolCall\s*\([^)]*\)",
+        "McpServer::DoToolCall",
+    )
+    reject_pos = call_body.find('kGoshaNoMotionSafeProfile && tool_name == "self.upgrade_firmware"')
+    find_tool_pos = call_body.find("std::find_if")
+    require(reject_pos >= 0, f"{UPGRADE_TOOL} must be rejected when no-motion profile is active")
+    require(find_tool_pos >= 0, "McpServer::DoToolCall tool lookup was not found")
+    require(
+        reject_pos < find_tool_pos,
+        f"{UPGRADE_TOOL} no-motion rejection must run before tool lookup",
+    )
+    reject_tail = call_body[reject_pos : reject_pos + 400]
+    require("ReplyError" in reject_tail and "return;" in reject_tail, f"{UPGRADE_TOOL} rejection must return an error")
+
+
 def validate_release_hook(release_py: str) -> None:
     require(
         '"scripts/check_gosha_v1_no_motion_profile.py", "--self-test"' in release_py,
@@ -218,11 +259,13 @@ def validate_tree(
     controller: str,
     movements_cc: str,
     movements_h: str,
+    mcp_server: str,
     release_py: str,
 ) -> None:
     validate_config(config_json, kconfig)
     validate_motion_init(movements_h, movements_cc, controller)
     validate_motion_entrypoints(controller)
+    validate_firmware_upgrade_entrypoint(mcp_server)
     validate_release_hook(release_py)
 
 
@@ -233,6 +276,7 @@ def validate_current_tree() -> None:
         read(OTTO_CONTROLLER),
         read(OTTO_MOVEMENTS_CC),
         read(OTTO_MOVEMENTS_H),
+        read(MCP_SERVER),
         read(RELEASE),
     )
 
@@ -243,9 +287,10 @@ def run_self_test() -> None:
     controller = read(OTTO_CONTROLLER)
     movements_cc = read(OTTO_MOVEMENTS_CC)
     movements_h = read(OTTO_MOVEMENTS_H)
+    mcp_server = read(MCP_SERVER)
     release_py = read(RELEASE)
 
-    validate_tree(config_json, kconfig, controller, movements_cc, movements_h, release_py)
+    validate_tree(config_json, kconfig, controller, movements_cc, movements_h, mcp_server, release_py)
 
     try:
         validate_tree(
@@ -254,6 +299,7 @@ def run_self_test() -> None:
             controller,
             movements_cc,
             movements_h,
+            mcp_server,
             release_py,
         )
     except GuardError as exc:
@@ -268,6 +314,7 @@ def run_self_test() -> None:
             controller.replace("if (!kNoMotionSafeProfile) {", "if (kNoMotionSafeProfile) {", 1),
             movements_cc,
             movements_h,
+            mcp_server,
             release_py,
         )
     except GuardError as exc:
@@ -282,12 +329,47 @@ def run_self_test() -> None:
             controller,
             movements_cc.replace("if (attach_servos) {", "if (true) {"),
             movements_h,
+            mcp_server,
             release_py,
         )
     except GuardError as exc:
         require("attach_servos" in str(exc), "servo attach negative test did not name attach_servos")
     else:
         raise GuardError("servo attach negative test failed: unconditional attach was accepted")
+
+    try:
+        validate_tree(
+            config_json,
+            kconfig,
+            controller,
+            movements_cc,
+            movements_h,
+            mcp_server.replace("if (!kGoshaNoMotionSafeProfile) {", "if (kGoshaNoMotionSafeProfile) {", 1),
+            release_py,
+        )
+    except GuardError as exc:
+        require("self.upgrade_firmware" in str(exc), "upgrade registration negative test did not name self.upgrade_firmware")
+    else:
+        raise GuardError("upgrade registration negative test failed: unguarded MCP upgrade was accepted")
+
+    try:
+        validate_tree(
+            config_json,
+            kconfig,
+            controller,
+            movements_cc,
+            movements_h,
+            mcp_server.replace(
+                'kGoshaNoMotionSafeProfile && tool_name == "self.upgrade_firmware"',
+                'false && tool_name == "self.upgrade_firmware"',
+                1,
+            ),
+            release_py,
+        )
+    except GuardError as exc:
+        require("self.upgrade_firmware" in str(exc), "upgrade rejection negative test did not name self.upgrade_firmware")
+    else:
+        raise GuardError("upgrade rejection negative test failed: missing MCP upgrade rejection was accepted")
 
     print("gosha-v1 no-motion profile guard self-test passed")
 

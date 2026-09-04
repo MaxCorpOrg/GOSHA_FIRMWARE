@@ -27,10 +27,19 @@
   `self.otto.set_trim` и `self.otto.get_trims`. Read-only состояние остаётся:
   `self.otto.get_status`, `self.battery.get_level`, `self.otto.get_ip`. Голос,
   `Wi-Fi`, OTA/config, runtime events и локальный `WebSocket` не меняются.
+- Дополнение `2026-09-04` по замечанию reviewer PR `#37`: общий инструмент с
+  пометкой `user_only` `self.upgrade_firmware` теперь не регистрируется при
+  `CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y`, а прямой `tools/call` с этим именем
+  отклоняется в `McpServer::DoToolCall()` до поиска инструмента и до вызова
+  `Application::UpgradeFirmware()`. Это закрывает локальный `WebSocket`/MCP
+  обход установки образа с включённым движением; контролируемая владельцем
+  запись только app-раздела через serial с backup, verify и rollback этим кодом
+  не затронута.
 - Добавлен исполняемый static guard
   `firmware/scripts/check_gosha_v1_no_motion_profile.py`; `release.py` запускает
   его для `gosha-v1` вместе с существующими static guards до owner-only
-  `GOSHA_OTA_URL`.
+  `GOSHA_OTA_URL`. Guard расширен на закрытие `self.upgrade_firmware` в общем
+  MCP-слое и имеет отрицательные проверки для регистрации и прямого вызова.
 - Проверки без устройства прошли: новый no-motion guard с `--self-test`,
   существующие pin map, GPIO3/audio-contract и sensitive logging guards,
   `py_compile`, `git diff --check`, `scripts/release.py --list-boards --json`

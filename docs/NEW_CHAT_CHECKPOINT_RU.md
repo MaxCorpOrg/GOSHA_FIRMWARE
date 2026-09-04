@@ -24,11 +24,20 @@
   read-only инструменты `self.otto.get_status`, `self.battery.get_level` и
   `self.otto.get_ip`; голос, `Wi-Fi`, OTA/config, runtime events и локальный
   `WebSocket` остаются доступны.
+- Дополнение PR `#37` `2026-09-04` закрывает найденное замечание reviewer P1:
+  локальный `WebSocket` может передать MCP-сообщение, но при
+  `CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y` общий инструмент с пометкой `user_only`
+  `self.upgrade_firmware` больше не регистрируется и прямой `tools/call` с этим
+  именем отклоняется в `McpServer::DoToolCall()` до любых побочных эффектов
+  OTA. Контролируемая владельцем запись только app-раздела через serial остаётся
+  отдельной аппаратной процедурой с backup, verify и rollback и этим запретом не
+  ломается.
 - Добавлен static guard
   `firmware/scripts/check_gosha_v1_no_motion_profile.py --self-test`; он
   проверяет включение профиля в release-конфигурации, Kconfig-зависимость,
-  отсутствие servo attach на boot, защиту boot Home, закрытые MCP-инструменты и
-  release hook. `release.py` запускает guard вместе с pin map,
+  отсутствие servo attach на boot, защиту boot Home, закрытые MCP-инструменты,
+  закрытие `self.upgrade_firmware` в общем MCP-слое и release hook.
+  `release.py` запускает guard вместе с pin map,
   GPIO3/audio-contract и sensitive logging проверками до owner-only
   `GOSHA_OTA_URL`.
 - Проверки без устройства прошли: новый no-motion guard с `--self-test`,
