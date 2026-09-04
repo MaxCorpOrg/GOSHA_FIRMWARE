@@ -4,6 +4,46 @@
 > `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`. Неисправная левая серва физически
 > отключена; прежние запреты в исторических разделах ниже больше не действуют.
 
+## Статическая правка GPIO3/audio contract 2026-09-04
+
+- В отдельном firmware-worktree подготовлена локальная ветка
+  `codex/firmware-gpio3-samplerate-20260904` от
+  exact `0d7248ea08f17dad270fe6e5eee219a00f1f10d5`. Она не отправлялась и не
+  коммитилась.
+- По локальному ESP-IDF `5.5.2` проверен механизм предупреждения: LEDC
+  резервирует GPIO при `ledc_channel_config()`, `ledc_stop()` reservation не
+  снимает, а публичный `gpio_reset_pin()` снимает его через внутренний
+  `esp_gpio_revoke()`. Поэтому для `gosha-v1` добавлен
+  `ReleaseCameraProbePwm()`, который после неуспешного camera probe освобождает
+  `CAMERA_XCLK` перед дальнейшим использованием `GPIO3` как подсветки
+  non-camera дисплея.
+- Голосовой `hello` больше не оставляет неоднозначным смысл `sample_rate`.
+  Legacy поле `sample_rate=16000` сохранено для совместимости, но рядом
+  добавлены явные `input_sample_rate=16000`, `uplink_sample_rate=16000` и
+  `output_sample_rate`, взятый из фактического аудиокодека. Для текущей платы
+  это документирует ожидаемую схему `16000` вход/исходящий Opus и `24000`
+  локальный вывод.
+- Runtime warning `16000/24000` заменён на информационный лог о контракте и
+  ресемплинге. Это не скрывает настоящие ошибки: невозможность открыть output
+  resampler остаётся `ESP_LOGE` в `AudioService`.
+- Добавлен исполняемый static guard
+  `firmware/scripts/check_gosha_v1_gpio3_audio_contract.py`; `release.py` для
+  `gosha-v1` теперь запускает pin map, GPIO3/audio и sensitive logging guards
+  до чтения owner-only `GOSHA_OTA_URL`.
+- Проверки без устройства прошли: новый guard с `--self-test`, pin map guard с
+  `--self-test`, sensitive logging guard, `py_compile` guard/release.py,
+  `git diff --check`, `scripts/release.py --list-boards --json`,
+  `idf.py --version` с ESP-IDF `v5.5.2`. Non-canonical compile smoke для
+  `esp32s3`/`gosha-v1` в `/tmp` без owner-only `CONFIG_OTA_URL` прошёл до
+  `Project build complete` (`gosha.bin` `0x37c4c0`, 11% свободно в app
+  partition). Canonical `release.py gosha-v1 --name gosha-v1` подтвердил
+  запуск static guards и дальше ожидаемо остановился на отсутствующем
+  owner-only `GOSHA_OTA_URL`, поэтому release-образ не заявляется.
+- Аппаратные действия не выполнялись: USB/serial, flash, reboot, update, live
+  `:8080/ws`, motion, `Home`, `set_trim`, servo sequence и operator gateway не
+  запускались. Для доказательства исчезновения warning на реальном роботе нужен
+  отдельный no-motion hardware-window.
+
 ## Локальная pin map/LEDC правка 2026-09-03
 
 - В ветке `codex/noncamera-pinmap-ledc-fix-20260903` от `70a9884` для

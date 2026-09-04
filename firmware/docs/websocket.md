@@ -32,12 +32,16 @@
      "audio_params": {
        "format": "opus",
        "sample_rate": 16000,
+       "input_sample_rate": 16000,
+       "uplink_sample_rate": 16000,
+       "output_sample_rate": 24000,
        "channels": 1,
        "frame_duration": 60
      }
    }
    ```
    - 其中 `features` 字段为可选，内容根据设备编译配置自动生成。例如：`"mcp": true` 表示支持 MCP 协议。
+   - `sample_rate` 保持 16000 作为旧版兼容字段；`input_sample_rate` 和 `uplink_sample_rate` 表示设备发往服务器的 Opus 音频为 16000 Hz；`output_sample_rate` 表示设备本地音频 codec 的实际输出采样率。
    - `frame_duration` 的值对应 `OPUS_FRAME_DURATION_MS`（例如 60ms）。
 
 4. **服务器回复 "hello"**  
@@ -145,6 +149,9 @@ WebSocket 文本帧以 JSON 方式传输，以下为常见的 `"type"` 字段及
        "audio_params": {
          "format": "opus",
          "sample_rate": 16000,
+         "input_sample_rate": 16000,
+         "uplink_sample_rate": 16000,
+         "output_sample_rate": 24000,
          "channels": 1,
          "frame_duration": 60
        }
@@ -388,7 +395,7 @@ stateDiagram
    - 代码中部分消息包含 `session_id`，用于区分独立的对话或操作。服务端可根据需要对不同会话做分离处理。
 
 3. **音频负载**  
-   - 代码里默认使用 Opus 格式，并设置 `sample_rate = 16000`，单声道。帧时长由 `OPUS_FRAME_DURATION_MS` 控制，一般为 60ms。可根据带宽或性能做适当调整。为了获得更好的音乐播放效果，服务器下行音频可能使用 24000 采样率。
+   - 代码里默认使用 Opus 格式，并保留 `sample_rate = 16000` 作为旧版兼容字段，单声道。设备同时显式发送 `input_sample_rate = 16000`、`uplink_sample_rate = 16000` 和本地 codec 的 `output_sample_rate`。帧时长由 `OPUS_FRAME_DURATION_MS` 控制，一般为 60ms。可根据带宽或性能做适当调整。服务器下行音频如与设备输出采样率不同，设备端会进行重采样。
 
 4. **协议版本配置**  
    - 通过设置中的 `version` 字段配置二进制协议版本（1、2 或 3）
@@ -422,6 +429,9 @@ stateDiagram
      "audio_params": {
        "format": "opus",
        "sample_rate": 16000,
+       "input_sample_rate": 16000,
+       "uplink_sample_rate": 16000,
+       "output_sample_rate": 24000,
        "channels": 1,
        "frame_duration": 60
      }

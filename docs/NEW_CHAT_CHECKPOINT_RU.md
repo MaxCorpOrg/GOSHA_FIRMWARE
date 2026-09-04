@@ -4,6 +4,48 @@
 > `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`; прежние запреты ниже являются
 > историческими.
 
+## Статическая правка GPIO3/audio contract 2026-09-04
+
+- Ветка `codex/firmware-gpio3-samplerate-20260904` от exact
+  `0d7248ea08f17dad270fe6e5eee219a00f1f10d5` закрывает два остатка smoke без
+  обращения к устройству: `GPIO3` warning подсветки после неуспешного camera
+  probe и неоднозначный sample-rate contract `16000/24000`.
+- По локальному ESP-IDF `5.5.2` подтверждено: `ledc_channel_config()` через
+  `_ledc_set_pin()` резервирует GPIO, а `ledc_stop()` только гасит LEDC-сигнал
+  и не снимает reservation. Публичный `gpio_reset_pin()` внутри ESP-IDF
+  вызывает `esp_gpio_revoke(BIT64(gpio_num))`, поэтому `gosha-v1` теперь
+  освобождает `CAMERA_XCLK` через `ReleaseCameraProbePwm()`:
+  `ledc_stop()` плюс `gpio_reset_pin(CAMERA_XCLK)`. Приватный
+  `esp_gpio_revoke()` в код платы не добавлен.
+- `hello.audio_params` для WebSocket и MQTT теперь строится общим helper-ом:
+  legacy `sample_rate` остаётся `16000`, дополнительно явно передаются
+  `input_sample_rate=16000`, `uplink_sample_rate=16000` и
+  `output_sample_rate=<codec output>`. Для `gosha-v1` non-camera это сохраняет
+  вход/исходящий Opus на `16000` и сообщает фактический вывод кодека `24000`.
+- Предупреждение `Server sample rate ... does not match device output...`
+  заменено на информационный лог контракта, потому что `16000 -> 24000` является
+  ожидаемым ресемплингом, а не самостоятельной причиной отказа. Ошибки создания
+  ресемплера по-прежнему логируются в `AudioService`.
+- Добавлен static guard
+  `firmware/scripts/check_gosha_v1_gpio3_audio_contract.py --self-test`; он
+  проверяет освобождение `GPIO3`, явные audio fields, сохранение legacy
+  `sample_rate=16000` и negative-regression cases. `release.py` для
+  `gosha-v1` запускает этот guard вместе с pin map и sensitive logging guard до
+  owner-only сборочных параметров.
+- Проверки: новый guard и self-test прошли; `check_gosha_v1_pinmap.py
+  --self-test` прошёл; `check_sensitive_logging.py` прошёл; `py_compile`
+  нового guard и `release.py` прошёл; `git diff --check` прошёл; ESP-IDF
+  окружение подтверждено как `v5.5.2`; non-canonical compile smoke для
+  `esp32s3`/`gosha-v1` в `/tmp` прошёл до `Project build complete`
+  (`gosha.bin` `0x37c4c0`, 11% свободно в app partition). Canonical
+  `scripts/release.py gosha-v1 --name gosha-v1` дошёл через static guards и
+  ожидаемо остановился на отсутствующем owner-only `GOSHA_OTA_URL`, поэтому
+  release-образ не заявляется.
+- USB/serial, flash, reboot, update, raw `:8080/ws`, motion, `Home`,
+  `set_trim`, servo sequence и operator-command-gateway не выполнялись.
+  Исчезновение live warning по `GPIO3` ещё требует отдельного no-motion
+  hardware-window.
+
 ## Локальная pin map/LEDC правка 2026-09-03
 
 - Ветка `codex/noncamera-pinmap-ledc-fix-20260903` от `70a9884` убирает

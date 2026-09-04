@@ -3,6 +3,7 @@ import os
 import json
 import zipfile
 import argparse
+import subprocess
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
@@ -208,6 +209,22 @@ def _board_type_exists(board_type: str) -> bool:
     pattern = f'set(BOARD_TYPE "{board_leaf}")'
     return pattern in cmake_file
 
+
+def _run_gosha_v1_static_release_guards(board_type: str) -> None:
+    if Path(board_type).name != "gosha-v1":
+        return
+
+    guards = [
+        ["scripts/check_gosha_v1_pinmap.py", "--self-test"],
+        ["scripts/check_gosha_v1_gpio3_audio_contract.py", "--self-test"],
+        ["scripts/check_sensitive_logging.py"],
+    ]
+    for guard in guards:
+        result = subprocess.run([sys.executable, *guard], check=False)
+        if result.returncode != 0:
+            print(f"[ERROR] static release guard failed: {' '.join(guard)}", file=sys.stderr)
+            sys.exit(result.returncode)
+
 ################################################################################
 # Compile implementation
 ################################################################################
@@ -227,6 +244,7 @@ def release(board_type: str, config_filename: str = "config.json", *, filter_nam
 
     project_version = get_project_version()
     print(f"Project Version: {project_version} ({cfg_path})")
+    _run_gosha_v1_static_release_guards(board_type)
 
     with cfg_path.open() as f:
         cfg = json.load(f)
