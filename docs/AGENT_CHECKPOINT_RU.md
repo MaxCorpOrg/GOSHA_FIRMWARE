@@ -38,13 +38,29 @@
   планирования задачи и вызова `Application::UpgradeFirmware()`. Внешняя
   контролируемая владельцем запись только app-раздела через serial с backup,
   verify и rollback не использует этот MCP-инструмент и не меняется.
+- Дополнение PR `#40` на `2026-09-04`: автоматическое вызывающее место
+  `CheckNewVersion()` при активном no-motion профиле пропускает замену прошивки
+  во время работы до вызова `Application::UpgradeFirmware()`. Сама
+  `Application::UpgradeFirmware()` имеет ранний отказ до побочных эффектов в
+  `display`, `protocol` и `audio`, смены `state`, загрузки образа, записи
+  flash-памяти и reboot, поэтому будущий прямой вызов не сможет начать замену
+  прошивки во время работы.
+- `self.reboot` теперь закрыт так же строго, как ручная OTA-замена: удалённый
+  MCP-инструмент не регистрируется при
+  `CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y`, а прямой `tools/call` отклоняется в
+  `McpServer::DoToolCall()` до поиска инструмента, `Schedule()` и
+  `Application::Reboot()`.
+- Входящая серверная команда `system.command == "reboot"` тоже отклоняется в
+  no-motion профиле до `Schedule()` и `Application::Reboot()`.
 - Добавлен static guard
   `firmware/scripts/check_gosha_v1_no_motion_profile.py`; его `--self-test`
   имеет отрицательные проверки на снятый release-флаг, незащищённый boot Home и
   безусловный `AttachServos()`. Guard расширен на
-  `self.upgrade_firmware`: он проверяет закрытую регистрацию и ранний отказ
-  `tools/call`. `release.py` запускает guard для `gosha-v1` перед чтением
-  owner-only `GOSHA_OTA_URL`.
+  ранний отказ `Application::UpgradeFirmware()`, список разрешённых вызывающих мест,
+  `self.upgrade_firmware` и `self.reboot`: он проверяет закрытую регистрацию,
+  ранний отказ `tools/call` и отрицательный случай будущего незащищённого
+  вызывающего места OTA. `release.py` запускает guard для `gosha-v1` перед
+  чтением owner-only `GOSHA_OTA_URL`.
 - Локальные проверки без устройства прошли: `python3
   scripts/check_gosha_v1_no_motion_profile.py --self-test`, pin map guard,
   GPIO3/audio-contract guard, sensitive logging guard, `py_compile`,

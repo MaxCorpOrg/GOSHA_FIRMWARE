@@ -35,11 +35,27 @@
   обход установки образа с включённым движением; контролируемая владельцем
   запись только app-раздела через serial с backup, verify и rollback этим кодом
   не затронута.
+- Дополнение PR `#40` на `2026-09-04`: в
+  `CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y` автоматический `CheckNewVersion()`
+  пропускает замену прошивки во время работы до вызова
+  `Application::UpgradeFirmware()`, а сама `Application::UpgradeFirmware()`
+  сразу возвращает отказ до доступа к `display`, закрытия `protocol`,
+  остановки `audio`, смены `state`, загрузки образа, записи flash-памяти или
+  reboot. Проверки версии, активации и конфигурации остаются рабочими.
+- Удалённое MCP-действие `self.reboot` в no-motion профиле теперь не
+  регистрируется, а прямой `tools/call` с этим именем отклоняется до поиска
+  инструмента и планирования `Application::Reboot()`. Владелец по-прежнему
+  может выполнить локальный serial app-only flash и последующий контролируемый
+  reboot только после аппаратного preflight, backup, verify и rollback.
+- Серверная команда `system.command == "reboot"` при активном no-motion профиле
+  также отклоняется до `Schedule()` и `Application::Reboot()`.
 - Добавлен исполняемый static guard
   `firmware/scripts/check_gosha_v1_no_motion_profile.py`; `release.py` запускает
   его для `gosha-v1` вместе с существующими static guards до owner-only
-  `GOSHA_OTA_URL`. Guard расширен на закрытие `self.upgrade_firmware` в общем
-  MCP-слое и имеет отрицательные проверки для регистрации и прямого вызова.
+  `GOSHA_OTA_URL`. Guard расширен на раннее закрытие
+  `Application::UpgradeFirmware()`, список разрешённых вызывающих мест,
+  `self.upgrade_firmware` и `self.reboot` в общем MCP-слое; отрицательные
+  проверки ловят незащищённое вызывающее место, регистрацию и прямой вызов.
 - Проверки без устройства прошли: новый no-motion guard с `--self-test`,
   существующие pin map, GPIO3/audio-contract и sensitive logging guards,
   `py_compile`, `git diff --check`, `scripts/release.py --list-boards --json`

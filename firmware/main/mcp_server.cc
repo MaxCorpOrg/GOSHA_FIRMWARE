@@ -146,18 +146,22 @@ void McpServer::AddUserOnlyTools() {
             return board.GetSystemInfoJson();
         });
 
-    AddUserOnlyTool("self.reboot", "Reboot the system",
-        PropertyList(),
-        [this](const PropertyList& properties) -> ReturnValue {
-            auto& app = Application::GetInstance();
-            app.Schedule([&app]() {
-                ESP_LOGW(TAG, "User requested reboot");
-                vTaskDelay(pdMS_TO_TICKS(1000));
+    if (!kGoshaNoMotionSafeProfile) {
+        AddUserOnlyTool("self.reboot", "Reboot the system",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                auto& app = Application::GetInstance();
+                app.Schedule([&app]() {
+                    ESP_LOGW(TAG, "User requested reboot");
+                    vTaskDelay(pdMS_TO_TICKS(1000));
 
-                app.Reboot();
+                    app.Reboot();
+                });
+                return true;
             });
-            return true;
-        });
+    } else {
+        ESP_LOGW(TAG, "Reboot MCP tool disabled by no-motion safe profile");
+    }
 
     // Firmware upgrade
     if (!kGoshaNoMotionSafeProfile) {
@@ -527,6 +531,12 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
 }
 
 void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments) {
+    if (kGoshaNoMotionSafeProfile && tool_name == "self.reboot") {
+        ESP_LOGW(TAG, "Blocked reboot MCP call by no-motion safe profile");
+        ReplyError(id, "Reboot is disabled by the no-motion safe profile");
+        return;
+    }
+
     if (kGoshaNoMotionSafeProfile && tool_name == "self.upgrade_firmware") {
         ESP_LOGW(TAG, "Blocked firmware upgrade MCP call by no-motion safe profile");
         ReplyError(id, "Firmware upgrade is disabled by the no-motion safe profile");
