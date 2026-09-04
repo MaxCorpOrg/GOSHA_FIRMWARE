@@ -79,6 +79,7 @@ struct AudioServiceCallbacks {
     std::function<void(void)> on_send_queue_available;
     std::function<void(const std::string&)> on_wake_word_detected;
     std::function<void(bool)> on_vad_change;
+    std::function<void(void)> on_remote_audio_output;
     std::function<void(void)> on_audio_testing_queue_full;
 };
 
@@ -93,6 +94,7 @@ struct AudioTask {
     AudioTaskType type;
     std::vector<int16_t> pcm;
     uint32_t timestamp;
+    AudioStreamSource source = AudioStreamSource::kRemote;
 };
 
 struct DebugStatistics {

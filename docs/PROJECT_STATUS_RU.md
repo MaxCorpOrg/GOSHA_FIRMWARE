@@ -4,6 +4,70 @@
 > `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`. Неисправная левая серва физически
 > отключена; прежние запреты в исторических разделах ниже больше не действуют.
 
+## Voice turn phase emission PR48 2026-09-04
+
+- В выделенном workspace `/workspace` подготовлена статическая прошивочная
+  правка для Issue `#50` поверх канонического prepared head
+  `f1fdb89d508217134ccc91c03358e43c9809137c`. Локальная ветка `master` и
+  локальный верхний commit являются синтетическим baseline AI Office; commit,
+  push, rebase и PR на worker не выполнялись.
+- Правка добавляет прошивочную сторону контракта `gosha.runtime.event.v1` с
+  `event_type="voice.turn.phase"` через уже существующий неблокирующий
+  `RuntimeEventReporter`.
+- Реальный голосовой путь для этой правки: `AudioService` сообщает о слове
+  пробуждения в `Application`; VAD сообщает начало и конец речи пользователя;
+  `tts start` от сервера только переводит устройство в `kDeviceStateSpeaking`;
+  первый реально доказанный ответ робота появляется не на `tts start`, а после
+  первого `codec_->OutputData(...)` в `AudioService::AudioOutputTask()`.
+- На один голосовой turn, то есть один цикл речи пользователя и ответа робота,
+  создаются ограниченные по длине `correlation_id` и `task.id`. Они построены из
+  `esp_random()` и локального счётчика и остаются стабильными до reset turn или
+  следующего turn. Эти значения не берутся из raw device id, `MAC`, `IP`,
+  серверного `session_id`, URL, token, SSID, transcript, prompt или raw audio.
+- Публикуемые фазы ограничены доказуемыми границами прошивки:
+  `wake_detected`, `user_speech_start`, `user_speech_end`,
+  `robot_first_audio_out` и `turn_failed` при активном turn и отказе
+  открытия/сети голосового канала. `turn_complete` не добавлен: текущий
+  протокол не даёт прошивке точной физической границы полного конца серверного
+  turn.
+- Полезная часть события безопасная: `source.kind="robot"`,
+  `trace.correlation_id`, `task.id`, а в объекте `voice` только `phase` и
+  `warm_state`. Transcript,
+  prompt, URL, token, SSID, `MAC`, `IP`, raw audio и raw device id не
+  добавляются.
+- Для защиты `robot_first_audio_out` от ложного раннего срабатывания добавлен
+  `AudioStreamSource`: удалённое аудио протокола остаётся `kRemote`, локальные
+  `PlaySound()` и тестовое аудио становятся `kLocal`, а обратный вызов
+  `on_remote_audio_output` вызывается после `codec_->OutputData(...)` только
+  для `kRemote`.
+- На закрытии аудиоканала reset turn выполняется после
+  `audio_service_.WaitForPlaybackQueueEmpty()`, чтобы удалённое аудио из очереди
+  не потеряло физически доказанный первый `codec_->OutputData(...)`.
+- Добавлена статическая проверка
+  `firmware/scripts/check_voice_turn_phase_events.py --self-test`; она имеет
+  отрицательные проверки на повторный первый аудиовыход, отсутствующий сброс
+  turn, попадание чувствительных данных и снятый no-motion guard.
+  `scripts/release.py` запускает её для `gosha-v1` до owner-only
+  `GOSHA_OTA_URL`.
+- No-motion профиль сохранён: новые вспомогательные функции voice turn не регистрируют и не
+  вызывают motion, `Home`, `set_trim`, servo sequence, reboot, OTA writes или
+  assets writes. Существующие guards `check_gosha_v1_no_motion_profile.py`,
+  pin map guard, GPIO3/audio guard и sensitive logging guard проходят.
+- Проверки без устройства прошли: `python3
+  scripts/check_voice_turn_phase_events.py --self-test`, `python3
+  scripts/check_gosha_v1_no_motion_profile.py --self-test`, `python3
+  scripts/check_gosha_v1_pinmap.py --self-test`, `python3
+  scripts/check_gosha_v1_gpio3_audio_contract.py --self-test`, `python3
+  scripts/check_sensitive_logging.py`, `python3 -m py_compile ...`, `python3
+  scripts/release.py --list-boards --json`, `git diff --check`. `python3
+  scripts/release.py gosha-v1 --name gosha-v1` прошёл статические проверки и ожидаемо
+  остановился на отсутствующем `GOSHA_OTA_URL`.
+- Compile smoke, то есть пробная сборка, не выполнялся: в контейнере и
+  доступном host-пути нет `idf.py` и `ESP-IDF export.sh`. Устройство не
+  использовалось: USB/serial, flash, reboot, update, raw `:8080/ws`,
+  live endpoint, credentials, motion, `Home`,
+  `set_trim`, servo sequence и OTA/assets writes не запускались.
+
 ## No-motion профиль `gosha-v1` 2026-09-04
 
 - В отдельном firmware-worktree подготовлена ветка

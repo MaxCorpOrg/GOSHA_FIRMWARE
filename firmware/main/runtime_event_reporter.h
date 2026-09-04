@@ -18,6 +18,8 @@ public:
                              const char* error_code = nullptr);
     void PublishHeartbeat();
     void MaybePublishHeartbeat(uint32_t uptime_seconds);
+    void PublishVoiceTurnPhase(const char* phase, const char* warm_state,
+                               const std::string& correlation_id, const std::string& task_id);
 
 private:
     RuntimeEventReporter();
@@ -38,6 +40,8 @@ private:
                            const char* link_kind, const char* link_status,
                            const char* previous_state = nullptr, const char* error_code = nullptr,
                            bool heartbeat = false);
+    std::string BuildVoiceTurnPhaseEvent(const char* phase, const char* warm_state,
+                                         const std::string& correlation_id, const std::string& task_id);
     int Send(const std::string& payload);
     void Run();
     static void TaskEntry(void* arg);

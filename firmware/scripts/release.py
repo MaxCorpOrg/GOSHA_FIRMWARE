@@ -218,6 +218,7 @@ def _run_gosha_v1_static_release_guards(board_type: str) -> None:
         ["scripts/check_gosha_v1_pinmap.py", "--self-test"],
         ["scripts/check_gosha_v1_gpio3_audio_contract.py", "--self-test"],
         ["scripts/check_gosha_v1_no_motion_profile.py", "--self-test"],
+        ["scripts/check_voice_turn_phase_events.py", "--self-test"],
         ["scripts/check_sensitive_logging.py"],
     ]
     for guard in guards:

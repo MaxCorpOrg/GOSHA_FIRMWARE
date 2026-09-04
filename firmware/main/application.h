@@ -143,6 +143,20 @@ private:
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 
+    struct VoiceTurnState {
+        bool active = false;
+        bool user_speech_active = false;
+        bool first_audio_out_reported = false;
+        bool tts_stop_seen = false;
+        std::string warm_state;
+        std::string correlation_id;
+        std::string task_id;
+    };
+
+    std::mutex voice_turn_mutex_;
+    VoiceTurnState voice_turn_;
+    uint32_t voice_turn_counter_ = 0;
+
 
     // Event handlers
     void HandleStateChangedEvent();
@@ -166,6 +180,18 @@ private:
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
     ListeningMode GetDefaultListeningMode() const;
+    const char* GetCurrentVoiceWarmState() const;
+    void StartVoiceTurnLocked(const char* warm_state);
+    void EnsureVoiceTurnStarted(const char* warm_state);
+    void ResetVoiceTurnLocked();
+    void ResetVoiceTurn();
+    void PublishVoiceTurnPhaseLocked(const char* phase);
+    void ReportWakeDetected();
+    void ReportUserSpeechChange(bool speaking);
+    void ReportRobotFirstAudioOutput();
+    void MarkVoiceTurnTtsStart();
+    void MarkVoiceTurnTtsStop();
+    void FailVoiceTurnIfActive();
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);

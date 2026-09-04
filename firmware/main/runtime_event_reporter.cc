@@ -155,6 +155,54 @@ std::string RuntimeEventReporter::BuildEvent(
     return result;
 }
 
+std::string RuntimeEventReporter::BuildVoiceTurnPhaseEvent(
+    const char* phase,
+    const char* warm_state,
+    const std::string& correlation_id,
+    const std::string& task_id) {
+    const uint32_t sequence = ++sequence_;
+    char event_id[64];
+    snprintf(event_id, sizeof(event_id), "%s-%lu", session_id_.c_str(), static_cast<unsigned long>(sequence));
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "schema_version", "gosha.runtime.event.v1");
+    cJSON_AddStringToObject(root, "event_id", event_id);
+    cJSON_AddStringToObject(root, "event_type", "voice.turn.phase");
+    cJSON_AddStringToObject(root, "severity", "info");
+    cJSON_AddNumberToObject(root, "sequence", sequence);
+
+    cJSON* source = cJSON_AddObjectToObject(root, "source");
+    cJSON_AddStringToObject(source, "kind", "robot");
+    cJSON_AddStringToObject(source, "instance_id", session_id_.c_str());
+    cJSON_AddStringToObject(source, "firmware_version", esp_app_get_description()->version);
+
+    cJSON* trace = cJSON_AddObjectToObject(root, "trace");
+    cJSON_AddStringToObject(trace, "session_id", session_id_.c_str());
+    AddString(trace, "correlation_id", correlation_id.c_str());
+
+    cJSON* task = cJSON_AddObjectToObject(root, "task");
+    AddString(task, "id", task_id.c_str());
+
+    const time_t now = time(nullptr);
+    if (now > 1577836800) {
+        struct tm utc = {};
+        gmtime_r(&now, &utc);
+        char occurred_at[32];
+        strftime(occurred_at, sizeof(occurred_at), "%Y-%m-%dT%H:%M:%SZ", &utc);
+        cJSON_AddStringToObject(root, "occurred_at", occurred_at);
+    }
+
+    cJSON* voice = cJSON_AddObjectToObject(root, "voice");
+    AddString(voice, "phase", phase);
+    AddString(voice, "warm_state", warm_state);
+
+    char* printed = cJSON_PrintUnformatted(root);
+    std::string result = printed != nullptr ? printed : "";
+    cJSON_free(printed);
+    cJSON_Delete(root);
+    return result;
+}
+
 void RuntimeEventReporter::PublishDeviceState(const char* previous_state, const char* current_state) {
     Enqueue(BuildEvent(
         "robot.device.state_changed",
@@ -206,6 +254,14 @@ void RuntimeEventReporter::MaybePublishHeartbeat(uint32_t uptime_seconds) {
     }
     last_heartbeat_seconds_.store(uptime_seconds);
     PublishHeartbeat();
+}
+
+void RuntimeEventReporter::PublishVoiceTurnPhase(
+    const char* phase,
+    const char* warm_state,
+    const std::string& correlation_id,
+    const std::string& task_id) {
+    Enqueue(BuildVoiceTurnPhaseEvent(phase, warm_state, correlation_id, task_id));
 }
 
 int RuntimeEventReporter::Send(const std::string& payload) {
