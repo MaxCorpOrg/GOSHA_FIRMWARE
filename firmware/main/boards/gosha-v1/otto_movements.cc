@@ -9,6 +9,12 @@ static const char* TAG = "OttoMovements";
 
 #define HAND_HOME_POSITION 45
 
+namespace {
+
+constexpr int kLegAndFootServoCount = RIGHT_FOOT + 1;
+
+}  // namespace
+
 Otto::Otto() {
     is_otto_resting_ = false;
     has_hands_ = false;
@@ -143,6 +149,24 @@ void Otto::MoveServos(int time, int servo_target[]) {
             adjustment_count++;
         }
     };
+}
+
+void Otto::HoldLegsFeetAtNeutral() {
+    if (GetRestState() == true) {
+        SetRestState(false);
+    }
+
+    // Сервоприводы не имеют обратной связи: прошивка не знает фактический
+    // механический угол после работы без PWM. Поэтому здесь нет ложного
+    // программного перехода от неизвестной позы. Оператор обязан заранее
+    // приблизить ноги и ступни к нейтрали при снятом питании.
+    for (int i = 0; i < kLegAndFootServoCount; i++) {
+        if (servo_pins_[i] != -1) {
+            servo_[i].SetPosition(90);
+        }
+    }
+
+    is_otto_resting_ = true;
 }
 
 void Otto::MoveSingle(int position, int servo_number) {

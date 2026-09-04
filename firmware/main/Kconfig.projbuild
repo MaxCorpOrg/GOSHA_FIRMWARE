@@ -512,6 +512,18 @@ config GOSHA_NO_MOTION_SAFE_PROFILE
         and servo sequences. Disable this only after a separate hardware admission for
         motion on gosha-v1.
 
+config GOSHA_SAFE_NEUTRAL_BOOT_PROFILE
+    bool "GOSHA v1 maintenance: one safe neutral boot"
+    depends on BOARD_TYPE_GOSHA_V1
+    depends on GOSHA_NO_MOTION_SAFE_PROFILE
+    default n
+    help
+        Maintenance-only profile for one owner-authorized boot. It keeps the
+        no-motion external contract, masks both hand channels as GPIO_NUM_NC,
+        attaches only the four leg/foot servos, sends one bounded neutral hold
+        command, and leaves all MCP/raw/server motion, trim, sequence, OTA,
+        assets write and reboot paths closed.
+
 choice
     depends on BOARD_TYPE_LILYGO_T_DISPLAY_P4
     prompt "Select the screen type"

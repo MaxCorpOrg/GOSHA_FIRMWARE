@@ -48,6 +48,7 @@ public:
 
     //-- Predetermined Motion Functions
     void MoveServos(int time, int servo_target[]);
+    void HoldLegsFeetAtNeutral();
     void MoveSingle(int position, int servo_number);
     void OscillateServos(int amplitude[SERVO_COUNT], int offset[SERVO_COUNT], int period,
                          double phase_diff[SERVO_COUNT], float cycle);

@@ -28,6 +28,35 @@
                 "CONFIG_CAMERA_OV3660_AUTO_DETECT_DVP_INTERFACE_SENSOR=y",
                 "CONFIG_CAMERA_OV3660_DVP_YUV422_240X240_24FPS=y"
             ]
+        },
+        {
+            "name": "gosha-v1-safe-neutral-boot",
+            "board_name": "GOSHA_SAFE_NEUTRAL_BOOT",
+            "required_env_sdkconfig": [
+                {
+                    "env": "GOSHA_OTA_URL",
+                    "config": "CONFIG_OTA_URL",
+                    "kind": "url",
+                    "redact": true
+                }
+            ],
+            "sdkconfig_append": [
+                "CONFIG_LANGUAGE_RU_RU=y",
+                "CONFIG_USE_CUSTOM_WAKE_WORD=y",
+                "CONFIG_CUSTOM_WAKE_WORD=\"gosha\"",
+                "CONFIG_CUSTOM_WAKE_WORD_DISPLAY=\"Гоша\"",
+                "CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=38",
+                "CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y",
+                "CONFIG_GOSHA_SAFE_NEUTRAL_BOOT_PROFILE=y",
+                "CONFIG_SR_MN_EN_MULTINET6_QUANT=y",
+                "CONFIG_HTTPD_WS_SUPPORT=y",
+                "CONFIG_CAMERA_OV2640=y",
+                "CONFIG_CAMERA_OV2640_AUTO_DETECT_DVP_INTERFACE_SENSOR=y",
+                "CONFIG_CAMERA_OV2640_DVP_YUV422_240X240_25FPS=y",
+                "CONFIG_CAMERA_OV3660=y",
+                "CONFIG_CAMERA_OV3660_AUTO_DETECT_DVP_INTERFACE_SENSOR=y",
+                "CONFIG_CAMERA_OV3660_DVP_YUV422_240X240_24FPS=y"
+            ]
         }
     ]
 }

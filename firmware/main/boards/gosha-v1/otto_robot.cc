@@ -22,10 +22,25 @@
 #include "system_reset.h"
 #include "websocket_control_server.h"
 #include "wifi_board.h"
+#include "sdkconfig.h"
 
 #define TAG "OttoRobot"
 
 extern void InitializeOttoController(const HardwareConfig& hw_config);
+
+namespace {
+
+#if defined(CONFIG_GOSHA_SAFE_NEUTRAL_BOOT_PROFILE) && !defined(CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE)
+#error "CONFIG_GOSHA_SAFE_NEUTRAL_BOOT_PROFILE requires CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE"
+#endif
+
+#ifdef CONFIG_GOSHA_SAFE_NEUTRAL_BOOT_PROFILE
+constexpr bool kSafeNeutralBootProfile = true;
+#else
+constexpr bool kSafeNeutralBootProfile = false;
+#endif
+
+}  // namespace
 
 class OttoRobot : public WifiBoard {
 private:
@@ -232,7 +247,28 @@ private:
         });
     }
 
-    void InitializeOttoController() { ::InitializeOttoController(hw_config_); }
+    void InitializeOttoController() {
+        if (!kSafeNeutralBootProfile) {
+            ::InitializeOttoController(hw_config_);
+            return;
+        }
+
+        HardwareConfig control_config = hw_config_;
+        control_config.left_hand_pin = GPIO_NUM_NC;
+        control_config.right_hand_pin = GPIO_NUM_NC;
+
+        if (has_camera_) {
+            control_config.left_leg_pin = GPIO_NUM_NC;
+            control_config.right_leg_pin = GPIO_NUM_NC;
+            control_config.left_foot_pin = GPIO_NUM_NC;
+            control_config.right_foot_pin = GPIO_NUM_NC;
+            ESP_LOGE(TAG, "Maintenance safe-neutral boot запрещён для camera-варианта: все servo PWM отключены");
+        } else {
+            ESP_LOGW(TAG, "Maintenance safe-neutral boot использует non-camera ноги/ступни и отключает оба канала рук");
+        }
+
+        ::InitializeOttoController(control_config);
+    }
 
 public:
     const HardwareConfig& GetHardwareConfig() const { return hw_config_; }

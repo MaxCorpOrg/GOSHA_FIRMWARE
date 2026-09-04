@@ -5,7 +5,7 @@
 #include <cJSON.h>
 #include <esp_log.h>
 
-#include <cstdlib> 
+#include <cstdlib>
 #include <cstring>
 
 #include "application.h"
@@ -28,6 +28,16 @@ constexpr bool kNoMotionSafeProfile = true;
 constexpr bool kNoMotionSafeProfile = false;
 #endif
 
+#if defined(CONFIG_GOSHA_SAFE_NEUTRAL_BOOT_PROFILE) && !defined(CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE)
+#error "CONFIG_GOSHA_SAFE_NEUTRAL_BOOT_PROFILE requires CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE"
+#endif
+
+#ifdef CONFIG_GOSHA_SAFE_NEUTRAL_BOOT_PROFILE
+constexpr bool kSafeNeutralBootProfile = true;
+#else
+constexpr bool kSafeNeutralBootProfile = false;
+#endif
+
 }  // namespace
 
 class OttoController {
@@ -36,7 +46,9 @@ private:
     TaskHandle_t action_task_handle_ = nullptr;
     QueueHandle_t action_queue_;
     bool has_hands_ = false;
+    bool has_complete_legs_feet_ = false;
     bool is_action_in_progress_ = false;
+    bool safe_neutral_boot_done_ = false;
 
     struct OttoActionParams {
         int action_type;
@@ -512,26 +524,71 @@ private:
         otto_.SetTrims(left_leg, right_leg, left_foot, right_foot, left_hand, right_hand);
     }
 
+    void PerformSafeNeutralBootOnce() {
+        if (!kSafeNeutralBootProfile || safe_neutral_boot_done_) {
+            return;
+        }
+        safe_neutral_boot_done_ = true;
+
+        if (!has_complete_legs_feet_) {
+            ESP_LOGE(TAG, "Maintenance safe-neutral boot отменён: не подтверждены все четыре канала ног и ступней");
+            return;
+        }
+
+        ESP_LOGW(TAG, "Maintenance safe-neutral boot: один раз подаю нейтральное удержание 90 градусов только на ноги и ступни");
+        ESP_LOGW(TAG, "Обратной связи сервоприводов нет: до подачи питания ноги и ступни должны быть механически близко к нейтрали");
+        ESP_LOGW(TAG, "Если слышен гул, есть нагрев, рывок, reset или brownout, питание нужно отключить вручную");
+
+        is_action_in_progress_ = true;
+        PowerManager::PauseBatteryUpdate();
+        otto_.HoldLegsFeetAtNeutral();
+        PowerManager::ResumeBatteryUpdate();
+        is_action_in_progress_ = false;
+
+        ESP_LOGW(TAG, "Maintenance safe-neutral boot завершён: ноги и ступни удерживаются, внешние motion/Home/trim/sequence маршруты закрыты");
+    }
+
 public:
     OttoController(const HardwareConfig& hw_config) {
+        const gpio_num_t left_hand_pin =
+            kSafeNeutralBootProfile ? GPIO_NUM_NC : hw_config.left_hand_pin;
+        const gpio_num_t right_hand_pin =
+            kSafeNeutralBootProfile ? GPIO_NUM_NC : hw_config.right_hand_pin;
+        const bool safe_neutral_pinset =
+            hw_config.left_leg_pin != GPIO_NUM_NC &&
+            hw_config.right_leg_pin != GPIO_NUM_NC &&
+            hw_config.left_foot_pin != GPIO_NUM_NC &&
+            hw_config.right_foot_pin != GPIO_NUM_NC &&
+            left_hand_pin == GPIO_NUM_NC &&
+            right_hand_pin == GPIO_NUM_NC;
+        const bool attach_servos =
+            !kNoMotionSafeProfile || (kSafeNeutralBootProfile && safe_neutral_pinset);
+
+        if (kSafeNeutralBootProfile) {
+            ESP_LOGW(TAG, "Maintenance safe-neutral boot: каналы рук программно отключены как GPIO_NUM_NC, PWM на руки не подаётся");
+        }
+
         otto_.Init(
             hw_config.left_leg_pin,
             hw_config.right_leg_pin,
             hw_config.left_foot_pin,
             hw_config.right_foot_pin,
-            hw_config.left_hand_pin,
-            hw_config.right_hand_pin,
-            !kNoMotionSafeProfile
+            left_hand_pin,
+            right_hand_pin,
+            attach_servos
         );
 
-        has_hands_ = (hw_config.left_hand_pin != GPIO_NUM_NC && hw_config.right_hand_pin != GPIO_NUM_NC);
+        has_hands_ = (left_hand_pin != GPIO_NUM_NC && right_hand_pin != GPIO_NUM_NC);
+        has_complete_legs_feet_ = safe_neutral_pinset;
         ESP_LOGI(TAG, "Инициализация Otto: %s сервоприводы рук", has_hands_ ? "есть" : "нет");
         ESP_LOGI(TAG, "Конфигурация выводов сервоприводов: LL=%d, RL=%d, LF=%d, RF=%d, LH=%d, RH=%d",
                  hw_config.left_leg_pin, hw_config.right_leg_pin,
                  hw_config.left_foot_pin, hw_config.right_foot_pin,
-                 hw_config.left_hand_pin, hw_config.right_hand_pin);
+                 left_hand_pin, right_hand_pin);
 
         LoadTrimsFromNVS();
+
+        PerformSafeNeutralBootOnce();
 
         action_queue_ = xQueueCreate(10, sizeof(OttoActionParams));
 
