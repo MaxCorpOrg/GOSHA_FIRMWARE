@@ -21,6 +21,16 @@
 
 #define TAG "Application"
 
+namespace {
+
+#ifdef CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE
+constexpr bool kGoshaNoMotionSafeProfile = true;
+#else
+constexpr bool kGoshaNoMotionSafeProfile = false;
+#endif
+
+}  // namespace
+
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
@@ -481,7 +491,9 @@ void Application::CheckNewVersion() {
         retry_delay = 10; // Reset retry delay
 
         if (ota_->HasNewVersion()) {
-            if (UpgradeFirmware(ota_->GetFirmwareUrl(), ota_->GetFirmwareVersion())) {
+            if (kGoshaNoMotionSafeProfile) {
+                ESP_LOGW(TAG, "Firmware upgrade skipped by no-motion safe profile");
+            } else if (UpgradeFirmware(ota_->GetFirmwareUrl(), ota_->GetFirmwareVersion())) {
                 return; // This line will never be reached after reboot
             }
             // If upgrade failed, continue to normal operation
@@ -620,6 +632,10 @@ void Application::InitializeProtocol() {
             if (cJSON_IsString(command)) {
                 ESP_LOGI(TAG, "System command: %s", command->valuestring);
                 if (strcmp(command->valuestring, "reboot") == 0) {
+                    if (kGoshaNoMotionSafeProfile) {
+                        ESP_LOGW(TAG, "System reboot command blocked by no-motion safe profile");
+                        return;
+                    }
                     // Do a reboot if user requests a OTA update
                     Schedule([this]() {
                         Reboot();
@@ -1013,6 +1029,11 @@ void Application::Reboot() {
 }
 
 bool Application::UpgradeFirmware(const std::string& url, const std::string& version) {
+    if (kGoshaNoMotionSafeProfile) {
+        ESP_LOGW(TAG, "Firmware upgrade blocked by no-motion safe profile");
+        return false;
+    }
+
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
 

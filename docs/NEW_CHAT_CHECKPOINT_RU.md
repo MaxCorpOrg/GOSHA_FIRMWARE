@@ -32,11 +32,26 @@
   OTA. Контролируемая владельцем запись только app-раздела через serial остаётся
   отдельной аппаратной процедурой с backup, verify и rollback и этим запретом не
   ломается.
+- Дополнение PR `#40` `2026-09-04` закрывает замену прошивки во время работы:
+  `CheckNewVersion()` при активном no-motion профиле не входит в
+  `Application::UpgradeFirmware()`, а сама `Application::UpgradeFirmware()`
+  немедленно возвращает отказ до действий с `display`, `protocol` и `audio`,
+  смены `state`, загрузки образа, записи flash-памяти и reboot. Проверки
+  версии, активации и конфигурации остаются доступными.
+- Удалённое MCP-действие `self.reboot` при no-motion профиле не регистрируется и
+  прямой `tools/call` с этим именем отклоняется до поиска инструмента,
+  `Schedule()` и `Application::Reboot()`. Локальный reboot, выполненный
+  владельцем после serial app-only flash, остаётся аппаратной процедурой, а не
+  MCP-командой.
+- Серверная команда `system.command == "reboot"` также отклоняется до
+  `Schedule()` и `Application::Reboot()`.
 - Добавлен static guard
   `firmware/scripts/check_gosha_v1_no_motion_profile.py --self-test`; он
   проверяет включение профиля в release-конфигурации, Kconfig-зависимость,
   отсутствие servo attach на boot, защиту boot Home, закрытые MCP-инструменты,
-  закрытие `self.upgrade_firmware` в общем MCP-слое и release hook.
+  ранний отказ `Application::UpgradeFirmware()`, список разрешённых вызывающих мест,
+  закрытие `self.upgrade_firmware` и `self.reboot` в общем MCP-слое и release
+  hook.
   `release.py` запускает guard вместе с pin map,
   GPIO3/audio-contract и sensitive logging проверками до owner-only
   `GOSHA_OTA_URL`.
