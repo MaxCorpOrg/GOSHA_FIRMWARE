@@ -52,19 +52,31 @@
   `Application::Reboot()`.
 - Входящая серверная команда `system.command == "reboot"` тоже отклоняется в
   no-motion профиле до `Schedule()` и `Application::Reboot()`.
+- Follow-up Issue `#47` для PR `#44` закрывает путь живой записи assets:
+  `self.assets.set_download_url` не регистрируется при
+  `CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y`, прямой MCP `tools/call` отклоняется
+  до поиска инструмента и общего `Schedule()`, `CheckAssetsVersion()` выходит
+  до открытия `assets/download_url` на запись, уведомлений, смены состояния,
+  повышения питания, `assets.Download()` и планирования обновления прогресса
+  через `Schedule()`, а
+  `Assets::Download()` имеет ранний отказ до HTTP, `UnApplyPartition()`,
+  стирания/записи flash-памяти и повторной инициализации раздела. Уже
+  установленный локальный assets-раздел продолжает применяться.
 - Добавлен static guard
   `firmware/scripts/check_gosha_v1_no_motion_profile.py`; его `--self-test`
   имеет отрицательные проверки на снятый release-флаг, незащищённый boot Home и
   безусловный `AttachServos()`. Guard расширен на
   ранний отказ `Application::UpgradeFirmware()`, список разрешённых вызывающих мест,
-  `self.upgrade_firmware` и `self.reboot`: он проверяет закрытую регистрацию,
-  ранний отказ `tools/call` и отрицательный случай будущего незащищённого
-  вызывающего места OTA. `release.py` запускает guard для `gosha-v1` перед
-  чтением owner-only `GOSHA_OTA_URL`.
+  `self.upgrade_firmware`, `self.reboot` и `self.assets.set_download_url`: он
+  проверяет закрытую регистрацию, ранний отказ `tools/call`, раннее закрытие
+  `CheckAssetsVersion()` и `Assets::Download()`, список разрешённых вызывающих
+  мест `Assets::Download()` и отрицательные случаи будущих незащищённых
+  вызывающих мест OTA/assets. `release.py` запускает guard для `gosha-v1`
+  перед чтением owner-only `GOSHA_OTA_URL`.
 - Локальные проверки без устройства прошли: `python3
-  scripts/check_gosha_v1_no_motion_profile.py --self-test`, pin map guard,
-  GPIO3/audio-contract guard, sensitive logging guard, `py_compile`,
-  `git diff --check`, `scripts/release.py --list-boards --json` с
+  scripts/check_gosha_v1_no_motion_profile.py --self-test`, прямой no-motion
+  guard, pin map guard, GPIO3/audio-contract guard, sensitive logging guard,
+  `py_compile`, `git diff --check`, `scripts/release.py --list-boards --json` с
   подтверждённым `gosha-v1`. Канонический `scripts/release.py gosha-v1 --name
   gosha-v1` прошёл все static guards и ожидаемо остановился на отсутствующем
   owner-only `GOSHA_OTA_URL`; production release build не выполнялся.
@@ -78,7 +90,9 @@
 - Аппаратные действия в этой задаче не выполнялись: USB/serial, flash, reboot,
   update, raw WebSocket, live smoke, motion, `Home`, `set_trim`, servo sequence
   и operator-command-gateway не запускались. Перед установкой этого кандидата
-  нужен отдельный no-motion hardware-window с backup/verify/rollback.
+  нужен отдельный no-motion hardware-window с backup/verify/rollback. Будущее
+  обслуживание assets требует такой же внешней процедуры владельца, а не
+  удалённой живой команды.
 
 ## Статическая правка GPIO3/audio contract 2026-09-04
 

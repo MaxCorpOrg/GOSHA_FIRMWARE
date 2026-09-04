@@ -396,14 +396,24 @@ void Application::CheckAssetsVersion() {
     }
     assets_version_checked_ = true;
 
-    auto& board = Board::GetInstance();
-    auto display = board.GetDisplay();
     auto& assets = Assets::GetInstance();
 
     if (!assets.partition_valid()) {
         ESP_LOGW(TAG, "Assets partition is disabled for board %s", BOARD_NAME);
         return;
     }
+
+    if (kGoshaNoMotionSafeProfile) {
+        ESP_LOGW(TAG, "Live assets replacement disabled by no-motion safe profile");
+        assets.Apply();
+        auto display = Board::GetInstance().GetDisplay();
+        display->SetChatMessage("system", "");
+        display->SetEmotion("microchip_ai");
+        return;
+    }
+
+    auto& board = Board::GetInstance();
+    auto display = board.GetDisplay();
     
     Settings settings("assets", true);
     // Check if there is a new assets need to be downloaded

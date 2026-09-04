@@ -309,16 +309,20 @@ void McpServer::AddUserOnlyTools() {
     // Assets download url
     auto& assets = Assets::GetInstance();
     if (assets.partition_valid()) {
-        AddUserOnlyTool("self.assets.set_download_url", "Set the download url for the assets",
-            PropertyList({
-                Property("url", kPropertyTypeString)
-            }),
-            [](const PropertyList& properties) -> ReturnValue {
-                auto url = properties["url"].value<std::string>();
-                Settings settings("assets", true);
-                settings.SetString("download_url", url);
-                return true;
-            });
+        if (!kGoshaNoMotionSafeProfile) {
+            AddUserOnlyTool("self.assets.set_download_url", "Set the download url for the assets",
+                PropertyList({
+                    Property("url", kPropertyTypeString)
+                }),
+                [](const PropertyList& properties) -> ReturnValue {
+                    auto url = properties["url"].value<std::string>();
+                    Settings settings("assets", true);
+                    settings.SetString("download_url", url);
+                    return true;
+                });
+        } else {
+            ESP_LOGW(TAG, "Assets download URL MCP tool disabled by no-motion safe profile");
+        }
     }
 }
 
@@ -540,6 +544,12 @@ void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* to
     if (kGoshaNoMotionSafeProfile && tool_name == "self.upgrade_firmware") {
         ESP_LOGW(TAG, "Blocked firmware upgrade MCP call by no-motion safe profile");
         ReplyError(id, "Firmware upgrade is disabled by the no-motion safe profile");
+        return;
+    }
+
+    if (kGoshaNoMotionSafeProfile && tool_name == "self.assets.set_download_url") {
+        ESP_LOGW(TAG, "Blocked assets download URL MCP call by no-motion safe profile");
+        ReplyError(id, "Assets download URL is disabled by the no-motion safe profile");
         return;
     }
 

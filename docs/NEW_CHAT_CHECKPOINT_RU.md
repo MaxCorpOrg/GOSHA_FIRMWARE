@@ -45,19 +45,31 @@
   MCP-командой.
 - Серверная команда `system.command == "reboot"` также отклоняется до
   `Schedule()` и `Application::Reboot()`.
+- Дополнение Issue `#47` для PR `#44` закрывает живую замену assets-раздела в
+  no-motion профиле: `self.assets.set_download_url` не регистрируется, прямой
+  `tools/call` отклоняется до поиска инструмента и `Schedule()`,
+  `CheckAssetsVersion()` возвращается до открытия `assets/download_url` на
+  запись, уведомлений, смены состояния, повышения питания, `assets.Download()`
+  и планирования обновления прогресса через `Schedule()`, а
+  `Assets::Download()` возвращает отказ до HTTP, `UnApplyPartition()`,
+  стирания/записи flash-памяти и повторной инициализации раздела. Локально
+  установленный assets-раздел всё ещё применяется.
 - Добавлен static guard
   `firmware/scripts/check_gosha_v1_no_motion_profile.py --self-test`; он
   проверяет включение профиля в release-конфигурации, Kconfig-зависимость,
   отсутствие servo attach на boot, защиту boot Home, закрытые MCP-инструменты,
   ранний отказ `Application::UpgradeFirmware()`, список разрешённых вызывающих мест,
-  закрытие `self.upgrade_firmware` и `self.reboot` в общем MCP-слое и release
-  hook.
+  закрытие `self.upgrade_firmware`, `self.reboot` и
+  `self.assets.set_download_url` в общем MCP-слое, раннее закрытие
+  `CheckAssetsVersion()` и `Assets::Download()`, список разрешённых вызывающих
+  мест `Assets::Download()` и release hook.
   `release.py` запускает guard вместе с pin map,
   GPIO3/audio-contract и sensitive logging проверками до owner-only
   `GOSHA_OTA_URL`.
 - Проверки без устройства прошли: новый no-motion guard с `--self-test`,
   pin map guard с `--self-test`, GPIO3/audio-contract guard с `--self-test`,
-  sensitive logging guard, `py_compile`, `git diff --check`,
+  sensitive logging guard, `py_compile`, прямой no-motion guard,
+  `git diff --check`,
   `scripts/release.py --list-boards --json` с подтверждённым `gosha-v1`.
   Канонический `scripts/release.py gosha-v1 --name gosha-v1` дошёл до всех
   static guards и ожидаемо остановился на отсутствующем owner-only
@@ -71,7 +83,8 @@
 - Это статическая firmware-правка без устройства: USB/serial, flash, reboot,
   update, raw `:8080/ws`, motion, `Home`, `set_trim`, servo sequence и operator
   gateway не выполнялись. Перед установкой нужен отдельный no-motion
-  hardware-window с backup/verify/rollback.
+  hardware-window с backup/verify/rollback. Любое будущее обслуживание assets
+  остаётся такой же внешней процедурой владельца, а не удалённой живой командой.
 
 ## Статическая правка GPIO3/audio contract 2026-09-04
 

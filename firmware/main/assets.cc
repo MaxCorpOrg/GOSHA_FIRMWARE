@@ -20,6 +20,16 @@
 #define TAG "Assets"
 #define PARTITION_LABEL "assets"
 
+namespace {
+
+#ifdef CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE
+constexpr bool kGoshaNoMotionSafeProfile = true;
+#else
+constexpr bool kGoshaNoMotionSafeProfile = false;
+#endif
+
+}  // namespace
+
 struct mmap_assets_table {
     char asset_name[32];          /*!< Name of the asset */
     uint32_t asset_size;          /*!< Size of the asset */
@@ -425,6 +435,11 @@ bool Assets::EmoteStrategy::Apply(Assets* assets) {
 }
 
 bool Assets::Download(std::string url, std::function<void(int progress, size_t speed)> progress_callback) {
+    if (kGoshaNoMotionSafeProfile) {
+        ESP_LOGW(TAG, "Assets download blocked by no-motion safe profile");
+        return false;
+    }
+
     const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(url);
     ESP_LOGI(TAG, "Downloading new version of assets from %s", diagnostic_url.c_str());
 
