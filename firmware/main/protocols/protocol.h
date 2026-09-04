@@ -43,6 +43,10 @@ enum ListeningMode {
 
 class Protocol {
 public:
+    static constexpr int kLegacyAudioSampleRate = 16000;
+    static constexpr int kAudioInputSampleRate = 16000;
+    static constexpr int kAudioUplinkSampleRate = 16000;
+
     virtual ~Protocol() = default;
 
     inline int server_sample_rate() const {
@@ -90,9 +94,9 @@ protected:
     std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_;
 
     virtual bool SendText(const std::string& text) = 0;
+    void AddAudioParams(cJSON* root, int frame_duration_ms) const;
     virtual void SetError(const std::string& message);
     virtual bool IsTimeout() const;
 };
 
 #endif // PROTOCOL_H
-

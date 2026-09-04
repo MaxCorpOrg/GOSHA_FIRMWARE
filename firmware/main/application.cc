@@ -552,8 +552,8 @@ void Application::InitializeProtocol() {
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
-            ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
-                protocol_->server_sample_rate(), codec->output_sample_rate());
+            ESP_LOGI(TAG, "Audio contract: uplink/input %d Hz, server downlink %d Hz, codec output %d Hz; output resampling enabled",
+                Protocol::kAudioUplinkSampleRate, protocol_->server_sample_rate(), codec->output_sample_rate());
         }
     });
     

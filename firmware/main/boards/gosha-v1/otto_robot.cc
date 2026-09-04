@@ -1,9 +1,11 @@
 #include <driver/i2c_master.h>
+#include <driver/gpio.h>
 #include <driver/ledc.h>
 #include <driver/spi_common.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
+#include <esp_err.h>
 #include <esp_log.h>
 
 #include "application.h"
@@ -37,6 +39,19 @@ private:
     EspVideo* camera_;
     bool has_camera_;
     OttoCameraType camera_type_;
+
+    void ReleaseCameraProbePwm() {
+        esp_err_t ret = ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL, 0);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Не удалось остановить PWM проверки камеры на GPIO%d: %s",
+                     CAMERA_XCLK, esp_err_to_name(ret));
+        }
+        ret = gpio_reset_pin(CAMERA_XCLK);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Не удалось освободить GPIO%d после проверки камеры: %s",
+                     CAMERA_XCLK, esp_err_to_name(ret));
+        }
+    }
 
     bool DetectHardwareVersion() {
         ledc_timer_config_t ledc_timer = {
@@ -82,7 +97,7 @@ private:
 
         ret = i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_);
         if (ret != ESP_OK) {
-            ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL, 0);
+            ReleaseCameraProbePwm();
             return false;
         }
         const uint8_t camera_addresses[] = {0x30, 0x3C, 0x21, 0x60};
@@ -140,7 +155,7 @@ private:
         if (!camera_found) {
             i2c_del_master_bus(i2c_bus_);
             i2c_bus_ = nullptr;
-            ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL, 0);
+            ReleaseCameraProbePwm();
             camera_type_ = OTTO_CAMERA_NONE;
         } else {
             // 根据 PID 判断摄像头类型

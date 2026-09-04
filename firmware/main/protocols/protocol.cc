@@ -1,4 +1,6 @@
 #include "protocol.h"
+#include "audio_codec.h"
+#include "board.h"
 
 #include <esp_log.h>
 
@@ -76,6 +78,22 @@ void Protocol::SendStopListening() {
 void Protocol::SendMcpMessage(const std::string& payload) {
     std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
     SendText(message);
+}
+
+void Protocol::AddAudioParams(cJSON* root, int frame_duration_ms) const {
+    auto codec = Board::GetInstance().GetAudioCodec();
+    const int output_sample_rate =
+        codec != nullptr ? codec->output_sample_rate() : kLegacyAudioSampleRate;
+
+    cJSON* audio_params = cJSON_CreateObject();
+    cJSON_AddStringToObject(audio_params, "format", "opus");
+    cJSON_AddNumberToObject(audio_params, "sample_rate", kLegacyAudioSampleRate);
+    cJSON_AddNumberToObject(audio_params, "input_sample_rate", kAudioInputSampleRate);
+    cJSON_AddNumberToObject(audio_params, "uplink_sample_rate", kAudioUplinkSampleRate);
+    cJSON_AddNumberToObject(audio_params, "output_sample_rate", output_sample_rate);
+    cJSON_AddNumberToObject(audio_params, "channels", 1);
+    cJSON_AddNumberToObject(audio_params, "frame_duration", frame_duration_ms);
+    cJSON_AddItemToObject(root, "audio_params", audio_params);
 }
 
 bool Protocol::IsTimeout() const {

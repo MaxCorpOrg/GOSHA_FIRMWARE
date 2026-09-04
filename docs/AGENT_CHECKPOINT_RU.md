@@ -6,6 +6,54 @@
 > servo sequence требуют отдельной явной команды владельца. Более ранние
 > запреты ниже сохраняют только историю соответствующих проверок.
 
+## Статическая правка GPIO3/audio contract 2026-09-04
+
+- Рабочая ветка `codex/firmware-gpio3-samplerate-20260904` стартовала от
+  exact PR `#33` head `0d7248ea08f17dad270fe6e5eee219a00f1f10d5` и меняет
+  только локальный Firmware worktree.
+- Причина `GPIO3` warning подтверждена по локальному ESP-IDF `5.5.2`:
+  `ledc_channel_config()` резервирует GPIO через `esp_gpio_reserve()`, а
+  `ledc_stop()` не вызывает revoke. Так как `CAMERA_XCLK` и non-camera
+  backlight у `gosha-v1` используют `GPIO3`, после отрицательного camera probe
+  нужно освобождать этот вывод до инициализации подсветки.
+- В `firmware/main/boards/gosha-v1/otto_robot.cc` добавлен
+  `ReleaseCameraProbePwm()`: сначала останавливается LEDC channel, затем
+  вызывается публичный `gpio_reset_pin(CAMERA_XCLK)`. По ESP-IDF этот public
+  API внутри делает `esp_gpio_revoke(BIT64(gpio_num))`, поэтому приватный
+  `esp_gpio_revoke()` и новая зависимость `esp_hw_support` в продуктовый код не
+  внесены.
+- В `Protocol` добавлен общий builder `AddAudioParams()`. WebSocket и MQTT
+  hello сохраняют legacy `sample_rate=16000`, но дополнительно передают
+  `input_sample_rate=16000`, `uplink_sample_rate=16000` и фактический
+  `output_sample_rate` из `codec->output_sample_rate()`. Для `gosha-v1`
+  non-camera контракт становится явным: вход/исходящий Opus — `16000`,
+  вывод кодека — `24000`.
+- Старый sample-rate warning в `Application` заменён на `ESP_LOGI` с явным
+  описанием `uplink/input`, server downlink и codec output. Это не выключает
+  проверку ошибок ресемплинга: `AudioService::SetDecodeSampleRate()` всё ещё
+  создаёт output resampler и логирует failure, если он не открылся.
+- Добавлен regression guard
+  `firmware/scripts/check_gosha_v1_gpio3_audio_contract.py`; он имеет
+  `--self-test` с отрицательными проверками. `release.py` для `gosha-v1`
+  теперь запускает pin map, GPIO3/audio и sensitive logging guards перед
+  owner-only `required_env_sdkconfig`.
+- Локальные проверки без устройства: `python3 scripts/check_gosha_v1_gpio3_audio_contract.py
+  --self-test`, `python3 scripts/check_gosha_v1_pinmap.py --self-test`,
+  `python3 scripts/check_sensitive_logging.py`, `python3 -m py_compile
+  scripts/check_gosha_v1_gpio3_audio_contract.py scripts/release.py`,
+  `git diff --check`, `scripts/release.py --list-boards --json` с
+  подтверждённым `gosha-v1`, `idf.py --version` после export ESP-IDF `5.5.2`.
+  Дополнительно выполнен non-canonical compile smoke для `esp32s3`/`gosha-v1`
+  в `/tmp` без `CONFIG_OTA_URL`; он дошёл до `Project build complete`
+  (`gosha.bin` `0x37c4c0`, 11% свободно в app partition). `python3
+  scripts/release.py gosha-v1 --name gosha-v1` прошёл static guards и ожидаемо
+  остановился на отсутствующем `GOSHA_OTA_URL`; production release build не
+  выполнялся.
+- Не выполнялись USB/serial, flash/reboot/update, raw WebSocket, live smoke,
+  motion, `Home`, `set_trim`, servo sequence и operator-command-gateway. Live
+  подтверждение исчезновения `GPIO3` warning остаётся отдельным no-motion
+  hardware-window.
+
 ## Локальная pin map/LEDC правка 2026-09-03
 
 - Ветка `codex/noncamera-pinmap-ledc-fix-20260903` от `70a9884` сохраняет

@@ -80,12 +80,15 @@ sequenceDiagram
   "features": {
     "mcp": true
   },
-  "audio_params": {
-    "format": "opus",
-    "sample_rate": 16000,
-    "channels": 1,
-    "frame_duration": 60
-  }
+    "audio_params": {
+      "format": "opus",
+      "sample_rate": 16000,
+      "input_sample_rate": 16000,
+      "uplink_sample_rate": 16000,
+      "output_sample_rate": 24000,
+      "channels": 1,
+      "frame_duration": 60
+    }
 }
 ```
 
@@ -390,4 +393,4 @@ MQTT + UDP 混合协议通过以下设计实现高效的音视频通信：
 - **自动恢复**：支持连接断开后的自动重连
 - **性能优化**：UDP 传输保证音频数据的实时性
 
-该协议适用于对实时性要求较高的语音交互场景，但需要在网络复杂度和传输性能之间做出权衡。 
+该协议适用于对实时性要求较高的语音交互场景，但需要在网络复杂度和传输性能之间做出权衡。
