@@ -49,19 +49,32 @@
   reboot только после аппаратного preflight, backup, verify и rollback.
 - Серверная команда `system.command == "reboot"` при активном no-motion профиле
   также отклоняется до `Schedule()` и `Application::Reboot()`.
+- Follow-up Issue `#47` для PR `#44` закрывает оставшийся путь живой записи
+  assets: `self.assets.set_download_url` не регистрируется при
+  `CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y`, прямой `tools/call` отклоняется до
+  поиска инструмента и общего `Schedule()`, `CheckAssetsVersion()` выходит до
+  открытия `assets/download_url` на запись, уведомлений, смены состояния,
+  повышения питания, `assets.Download()` и планирования обновления прогресса
+  через `Schedule()`, а
+  `Assets::Download()` возвращает отказ до HTTP, `UnApplyPartition()`,
+  стирания/записи flash-памяти и повторной инициализации раздела. Уже
+  установленный локальный assets-раздел продолжает применяться.
 - Добавлен исполняемый static guard
   `firmware/scripts/check_gosha_v1_no_motion_profile.py`; `release.py` запускает
   его для `gosha-v1` вместе с существующими static guards до owner-only
   `GOSHA_OTA_URL`. Guard расширен на раннее закрытие
   `Application::UpgradeFirmware()`, список разрешённых вызывающих мест,
-  `self.upgrade_firmware` и `self.reboot` в общем MCP-слое; отрицательные
+  `self.upgrade_firmware`, `self.reboot` и `self.assets.set_download_url` в
+  общем MCP-слое, раннее закрытие `CheckAssetsVersion()` и `Assets::Download()`,
+  список разрешённых вызывающих мест `Assets::Download()`; отрицательные
   проверки ловят незащищённое вызывающее место, регистрацию и прямой вызов.
 - Проверки без устройства прошли: новый no-motion guard с `--self-test`,
   существующие pin map, GPIO3/audio-contract и sensitive logging guards,
-  `py_compile`, `git diff --check`, `scripts/release.py --list-boards --json`
-  с подтверждённым `gosha-v1`. Канонический `scripts/release.py gosha-v1
-  --name gosha-v1` дошёл до всех static guards и остановился на отсутствующем
-  owner-only `GOSHA_OTA_URL`, поэтому production release build не выполнялся.
+  прямой no-motion guard, `py_compile`, `git diff --check`,
+  `scripts/release.py --list-boards --json` с подтверждённым `gosha-v1`.
+  Канонический `scripts/release.py gosha-v1 --name gosha-v1` дошёл до всех
+  static guards и остановился на отсутствующем owner-only `GOSHA_OTA_URL`,
+  поэтому production release build не выполнялся.
 - Non-canonical compile smoke на ESP-IDF `5.5.2` во временном `/tmp` каталоге
   прошёл до `Project build complete`: `CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y`
   подтверждён во временном `sdkconfig`, `gosha.bin` — `3629088` байт, SHA-256
@@ -71,7 +84,9 @@
 - Эта точка пока статическая: USB/serial, flash, reboot, update, live
   `:8080/ws`, motion, `Home`, `set_trim`, servo sequence и operator gateway не
   выполнялись. Для установки нужен отдельный no-motion hardware-window с
-  backup/verify/rollback.
+  backup/verify/rollback. Любое будущее обслуживание assets требует отдельной
+  внешней процедуры владельца с backup, verify и rollback, а не удалённой живой
+  команды.
 
 ## Статическая правка GPIO3/audio contract 2026-09-04
 

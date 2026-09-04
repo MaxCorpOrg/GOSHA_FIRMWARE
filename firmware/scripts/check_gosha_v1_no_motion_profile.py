@@ -15,11 +15,13 @@ OTTO_MOVEMENTS_CC = ROOT / "main/boards/gosha-v1/otto_movements.cc"
 OTTO_MOVEMENTS_H = ROOT / "main/boards/gosha-v1/otto_movements.h"
 MCP_SERVER = ROOT / "main/mcp_server.cc"
 APPLICATION = ROOT / "main/application.cc"
+ASSETS = ROOT / "main/assets.cc"
 RELEASE = ROOT / "scripts/release.py"
 
 NO_MOTION_FLAG = "CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y"
 UPGRADE_TOOL = '"self.upgrade_firmware"'
 REBOOT_TOOL = '"self.reboot"'
+ASSETS_DOWNLOAD_URL_TOOL = '"self.assets.set_download_url"'
 
 DANGEROUS_TOOLS = (
     '"self.otto.action"',
@@ -49,6 +51,24 @@ ALLOWED_UPGRADE_CALL_LINES = {
         'bool UpgradeFirmware(const std::string& url, const std::string& version = "");',
     ),
     ("main/mcp_server.cc", "bool success = app.UpgradeFirmware(url);"),
+}
+
+ALLOWED_ASSETS_DOWNLOAD_CALL_LINES = {
+    (
+        "main/application.cc",
+        "bool success = assets.Download(download_url, [this, display](int progress, size_t speed) -> void {",
+    ),
+    (
+        "main/assets.cc",
+        "bool Assets::Download(std::string url, std::function<void(int progress, size_t speed)> progress_callback) {",
+    ),
+}
+
+ALLOWED_PARTITION_WRITE_CALL_LINES = {
+    (
+        "main/assets.cc",
+        "esp_err_t err = esp_partition_write(partition_, total_written, buffer, ret);",
+    ),
 }
 
 
@@ -248,7 +268,7 @@ def validate_firmware_upgrade_entrypoint(mcp_server: str) -> None:
         "McpServer::AddUserOnlyTools",
     )
     intervals = protected_intervals(user_tools_body, "kGoshaNoMotionSafeProfile")
-    for tool in (REBOOT_TOOL, UPGRADE_TOOL):
+    for tool in (REBOOT_TOOL, UPGRADE_TOOL, ASSETS_DOWNLOAD_URL_TOOL):
         pos = user_tools_body.find(tool)
         require(pos >= 0, f"{tool} was not found")
         require(
@@ -267,6 +287,7 @@ def validate_firmware_upgrade_entrypoint(mcp_server: str) -> None:
     for tool_name, tool in (
         ("self.reboot", REBOOT_TOOL),
         ("self.upgrade_firmware", UPGRADE_TOOL),
+        ("self.assets.set_download_url", ASSETS_DOWNLOAD_URL_TOOL),
     ):
         reject_pos = call_body.find(f'kGoshaNoMotionSafeProfile && tool_name == "{tool_name}"')
         require(reject_pos >= 0, f"{tool} must be rejected when no-motion profile is active")
@@ -276,6 +297,123 @@ def validate_firmware_upgrade_entrypoint(mcp_server: str) -> None:
         )
         reject_tail = call_body[reject_pos : reject_pos + 400]
         require("ReplyError" in reject_tail and "return;" in reject_tail, f"{tool} rejection must return an error")
+
+
+def validate_assets_update_entrypoints(application: str, assets_cc: str, source_files: dict[str, str]) -> None:
+    check_body = extract_body(
+        application,
+        r"void\s+Application::CheckAssetsVersion\s*\([^)]*\)",
+        "Application::CheckAssetsVersion",
+    )
+    no_motion_pos = check_body.find("if (kGoshaNoMotionSafeProfile)")
+    settings_pos = check_body.find('Settings settings("assets", true)')
+    require(no_motion_pos >= 0, "Application::CheckAssetsVersion must reject live assets replacement in no-motion profile")
+    require(settings_pos >= 0, "Application::CheckAssetsVersion assets settings block was not found")
+    require(
+        no_motion_pos < settings_pos,
+        "Application::CheckAssetsVersion no-motion rejection must run before assets/download_url persistence state is opened",
+    )
+
+    no_motion_body = extract_body(
+        check_body,
+        r"if\s*\(\s*kGoshaNoMotionSafeProfile\s*\)",
+        "Application::CheckAssetsVersion no-motion guard",
+    )
+    require("assets.Apply();" in no_motion_body, "Application::CheckAssetsVersion must still apply local assets in no-motion profile")
+    require("return;" in no_motion_body, "Application::CheckAssetsVersion no-motion guard must return before live assets replacement")
+    for token in (
+        'Settings settings("assets", true)',
+        'settings.GetString("download_url")',
+        'settings.EraseKey("download_url")',
+        "Alert(Lang::Strings::LOADING_ASSETS",
+        "vTaskDelay(pdMS_TO_TICKS(3000))",
+        "SetDeviceState(kDeviceStateUpgrading)",
+        "PowerSaveLevel::PERFORMANCE",
+        "assets.Download(",
+        "Schedule([display",
+    ):
+        require(token not in no_motion_body, f"Application::CheckAssetsVersion no-motion guard must not run live assets side effect: {token}")
+
+    for token in (
+        'settings.GetString("download_url")',
+        'settings.EraseKey("download_url")',
+        "Alert(Lang::Strings::LOADING_ASSETS",
+        "SetDeviceState(kDeviceStateUpgrading)",
+        "PowerSaveLevel::PERFORMANCE",
+        "assets.Download(",
+    ):
+        pos = check_body.find(token)
+        require(pos >= 0, f"Application::CheckAssetsVersion assets update token was not found: {token}")
+        require(no_motion_pos < pos, f"Application::CheckAssetsVersion no-motion guard must run before {token}")
+
+    require(
+        "#ifdef CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE" in assets_cc
+        and "constexpr bool kGoshaNoMotionSafeProfile = true;" in assets_cc
+        and "constexpr bool kGoshaNoMotionSafeProfile = false;" in assets_cc,
+        "Assets must derive kGoshaNoMotionSafeProfile from CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE",
+    )
+    download_body = extract_body(
+        assets_cc,
+        r"bool\s+Assets::Download\s*\(",
+        "Assets::Download",
+    )
+    reject_pos = download_body.find("if (kGoshaNoMotionSafeProfile)")
+    require(reject_pos >= 0, "Assets::Download must reject no-motion assets download requests")
+    reject_tail = download_body[reject_pos : reject_pos + 300]
+    require("return false;" in reject_tail, "Assets::Download no-motion rejection must return false")
+    for token in (
+        "diagnostic_redaction::RedactUrlForDiagnostics",
+        "UnApplyPartition()",
+        "CreateHttp",
+        "esp_partition_erase_range",
+        "esp_partition_write",
+        "InitializePartition()",
+    ):
+        pos = download_body.find(token)
+        require(pos >= 0, f"Assets::Download token was not found: {token}")
+        require(reject_pos < pos, f"Assets::Download no-motion rejection must run before {token}")
+
+    call_lines: list[tuple[str, str, int]] = []
+    for rel_path, source in sorted(source_files.items()):
+        for match in re.finditer(r"(?:Assets::Download|\.Download)\s*\(", source):
+            line_no = source.count("\n", 0, match.start()) + 1
+            line_start = source.rfind("\n", 0, match.start()) + 1
+            line_end = source.find("\n", match.start())
+            if line_end == -1:
+                line_end = len(source)
+            call_lines.append((rel_path, source[line_start:line_end].strip(), line_no))
+
+    unexpected = [
+        (rel_path, line, line_no)
+        for rel_path, line, line_no in call_lines
+        if (rel_path, line) not in ALLOWED_ASSETS_DOWNLOAD_CALL_LINES
+    ]
+    require(
+        not unexpected,
+        "unexpected Assets::Download caller: "
+        + ", ".join(f"{rel_path}:{line_no}: {line}" for rel_path, line, line_no in unexpected),
+    )
+
+    partition_write_lines: list[tuple[str, str, int]] = []
+    for rel_path, source in sorted(source_files.items()):
+        for match in re.finditer(r"\besp_partition_write\s*\(", source):
+            line_no = source.count("\n", 0, match.start()) + 1
+            line_start = source.rfind("\n", 0, match.start()) + 1
+            line_end = source.find("\n", match.start())
+            if line_end == -1:
+                line_end = len(source)
+            partition_write_lines.append((rel_path, source[line_start:line_end].strip(), line_no))
+
+    unexpected_partition_writes = [
+        (rel_path, line, line_no)
+        for rel_path, line, line_no in partition_write_lines
+        if (rel_path, line) not in ALLOWED_PARTITION_WRITE_CALL_LINES
+    ]
+    require(
+        not unexpected_partition_writes,
+        "unexpected esp_partition_write caller: "
+        + ", ".join(f"{rel_path}:{line_no}: {line}" for rel_path, line, line_no in unexpected_partition_writes),
+    )
 
 
 def validate_application_upgrade_entrypoint(application: str, source_files: dict[str, str]) -> None:
@@ -371,6 +509,7 @@ def validate_tree(
     validate_motion_init(movements_h, movements_cc, controller)
     validate_motion_entrypoints(controller)
     validate_firmware_upgrade_entrypoint(mcp_server)
+    validate_assets_update_entrypoints(application, read(ASSETS), source_files)
     validate_application_upgrade_entrypoint(application, source_files)
     validate_release_hook(release_py)
 
@@ -397,6 +536,7 @@ def run_self_test() -> None:
     movements_h = read(OTTO_MOVEMENTS_H)
     mcp_server = read(MCP_SERVER)
     application = read(APPLICATION)
+    assets_cc = read(ASSETS)
     release_py = read(RELEASE)
     source_files = collect_main_sources()
 
@@ -540,6 +680,76 @@ def run_self_test() -> None:
             controller,
             movements_cc,
             movements_h,
+            mcp_server.replace(
+                'kGoshaNoMotionSafeProfile && tool_name == "self.assets.set_download_url"',
+                'false && tool_name == "self.assets.set_download_url"',
+                1,
+            ),
+            application,
+            release_py,
+            source_files,
+        )
+    except GuardError as exc:
+        require("self.assets.set_download_url" in str(exc), "assets URL rejection negative test did not name self.assets.set_download_url")
+    else:
+        raise GuardError("assets URL rejection negative test failed: missing MCP assets URL rejection was accepted")
+
+    try:
+        validate_tree(
+            config_json,
+            kconfig,
+            controller,
+            movements_cc,
+            movements_h,
+            mcp_server.replace(
+                '    // Assets download url\n    auto& assets = Assets::GetInstance();\n    if (assets.partition_valid()) {\n        if (!kGoshaNoMotionSafeProfile) {',
+                '    // Assets download url\n    auto& assets = Assets::GetInstance();\n    if (assets.partition_valid()) {\n        if (kGoshaNoMotionSafeProfile) {',
+                1,
+            ),
+            application,
+            release_py,
+            source_files,
+        )
+    except GuardError as exc:
+        require("self.assets.set_download_url" in str(exc), "assets URL registration negative test did not name self.assets.set_download_url")
+    else:
+        raise GuardError("assets URL registration negative test failed: unguarded MCP assets URL tool was accepted")
+
+    try:
+        validate_tree(
+            config_json,
+            kconfig,
+            controller,
+            movements_cc,
+            movements_h,
+            mcp_server,
+            application.replace("if (kGoshaNoMotionSafeProfile) {\n        ESP_LOGW(TAG, \"Live assets replacement disabled by no-motion safe profile\");", "if (false) {\n        ESP_LOGW(TAG, \"Live assets replacement disabled by no-motion safe profile\");", 1),
+            release_py,
+            source_files,
+        )
+    except GuardError as exc:
+        require("CheckAssetsVersion" in str(exc), "assets CheckAssetsVersion negative test did not name CheckAssetsVersion")
+    else:
+        raise GuardError("assets CheckAssetsVersion negative test failed: missing no-motion guard was accepted")
+
+    try:
+        validate_assets_update_entrypoints(
+            application,
+            assets_cc.replace("if (kGoshaNoMotionSafeProfile) {", "if (false) {", 1),
+            source_files,
+        )
+    except GuardError as exc:
+        require("Assets::Download" in str(exc), "Assets::Download negative test did not name Assets::Download")
+    else:
+        raise GuardError("Assets::Download negative test failed: missing no-motion guard was accepted")
+
+    try:
+        validate_tree(
+            config_json,
+            kconfig,
+            controller,
+            movements_cc,
+            movements_h,
             mcp_server,
             application.replace(
                 'if (kGoshaNoMotionSafeProfile) {\n        ESP_LOGW(TAG, "Firmware upgrade blocked by no-motion safe profile");\n        return false;\n    }\n\n    auto& board',
@@ -595,6 +805,49 @@ def run_self_test() -> None:
         require("UpgradeFirmware" in str(exc), "future caller negative test did not name UpgradeFirmware")
     else:
         raise GuardError("future caller negative test failed: unexpected UpgradeFirmware caller was accepted")
+
+    future_assets_sources = dict(source_files)
+    future_assets_sources["main/future_unchecked_assets_caller.cc"] = (
+        'void FutureUncheckedAssetsCaller() { Assets::GetInstance().Download("https://example.invalid/assets.bin", nullptr); }\n'
+    )
+    try:
+        validate_tree(
+            config_json,
+            kconfig,
+            controller,
+            movements_cc,
+            movements_h,
+            mcp_server,
+            application,
+            release_py,
+            future_assets_sources,
+        )
+    except GuardError as exc:
+        require("Assets::Download" in str(exc), "future assets caller negative test did not name Assets::Download")
+    else:
+        raise GuardError("future assets caller negative test failed: unexpected Assets::Download caller was accepted")
+
+    future_partition_write_sources = dict(source_files)
+    future_partition_write_sources["main/future_unchecked_assets_writer.cc"] = (
+        "void FutureUncheckedAssetsWriter(const esp_partition_t* partition, const void* data, size_t size) { "
+        "esp_partition_write(partition, 0, data, size); }\n"
+    )
+    try:
+        validate_tree(
+            config_json,
+            kconfig,
+            controller,
+            movements_cc,
+            movements_h,
+            mcp_server,
+            application,
+            release_py,
+            future_partition_write_sources,
+        )
+    except GuardError as exc:
+        require("esp_partition_write" in str(exc), "future partition write negative test did not name esp_partition_write")
+    else:
+        raise GuardError("future partition write negative test failed: unexpected esp_partition_write caller was accepted")
 
     try:
         validate_tree(
