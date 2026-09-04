@@ -4,6 +4,50 @@
 > `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`. Неисправная левая серва физически
 > отключена; прежние запреты в исторических разделах ниже больше не действуют.
 
+## No-motion профиль `gosha-v1` 2026-09-04
+
+- В отдельном firmware-worktree подготовлена ветка
+  `codex/firmware-no-motion-safe-profile-20260904` от exact
+  `4ce2cab34cc222d8624e97e7ddb62a6365e1c231`. Это продолжение принятого
+  GPIO3/audio-contract кандидата без обращения к устройству.
+- Цель правки — сделать текущий безопасный `gosha-v1` release-кандидат
+  неподвижным на уровне кода: не полагаться только на физически отключённую
+  левую руку и не оставлять boot Home или MCP motion gateway доступными по
+  ошибке.
+- В release-конфигурацию `gosha-v1` добавлен
+  `CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y`; сам Kconfig-символ зависит от
+  `BOARD_TYPE_GOSHA_V1` и по умолчанию выключен. Чтобы вернуть движение позже,
+  нужно отдельное аппаратное разрешение и отдельная осознанная смена этого
+  параметра.
+- В no-motion сборке `Otto::Init()` не вызывает `AttachServos()`, boot
+  `ACTION_HOME` не ставится в очередь, а `QueueAction()` и
+  `QueueServoSequence()` имеют отдельные проверки до `xQueueSend()`.
+- MCP-инструменты движения и калибровки в no-motion сборке не регистрируются:
+  `self.otto.action`, `self.otto.servo_sequences`, `self.otto.stop`,
+  `self.otto.set_trim` и `self.otto.get_trims`. Read-only состояние остаётся:
+  `self.otto.get_status`, `self.battery.get_level`, `self.otto.get_ip`. Голос,
+  `Wi-Fi`, OTA/config, runtime events и локальный `WebSocket` не меняются.
+- Добавлен исполняемый static guard
+  `firmware/scripts/check_gosha_v1_no_motion_profile.py`; `release.py` запускает
+  его для `gosha-v1` вместе с существующими static guards до owner-only
+  `GOSHA_OTA_URL`.
+- Проверки без устройства прошли: новый no-motion guard с `--self-test`,
+  существующие pin map, GPIO3/audio-contract и sensitive logging guards,
+  `py_compile`, `git diff --check`, `scripts/release.py --list-boards --json`
+  с подтверждённым `gosha-v1`. Канонический `scripts/release.py gosha-v1
+  --name gosha-v1` дошёл до всех static guards и остановился на отсутствующем
+  owner-only `GOSHA_OTA_URL`, поэтому production release build не выполнялся.
+- Non-canonical compile smoke на ESP-IDF `5.5.2` во временном `/tmp` каталоге
+  прошёл до `Project build complete`: `CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y`
+  подтверждён во временном `sdkconfig`, `gosha.bin` — `3629088` байт, SHA-256
+  `7595328ab0a12ed65a8e68f4d5ae08e521bf641cd88264cd5699bfdd7cde1af1`,
+  свободно 12% app-раздела. Этот образ не является release-артефактом для
+  установки.
+- Эта точка пока статическая: USB/serial, flash, reboot, update, live
+  `:8080/ws`, motion, `Home`, `set_trim`, servo sequence и operator gateway не
+  выполнялись. Для установки нужен отдельный no-motion hardware-window с
+  backup/verify/rollback.
+
 ## Статическая правка GPIO3/audio contract 2026-09-04
 
 - В отдельном firmware-worktree подготовлена локальная ветка

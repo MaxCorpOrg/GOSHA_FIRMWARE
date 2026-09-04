@@ -28,7 +28,7 @@ unsigned long IRAM_ATTR millis() {
 }
 
 void Otto::Init(int left_leg, int right_leg, int left_foot, int right_foot, int left_hand,
-                int right_hand) {
+                int right_hand, bool attach_servos) {
     servo_pins_[LEFT_LEG] = left_leg;
     servo_pins_[RIGHT_LEG] = right_leg;
     servo_pins_[LEFT_FOOT] = left_foot;
@@ -39,8 +39,12 @@ void Otto::Init(int left_leg, int right_leg, int left_foot, int right_foot, int 
     // 检查是否有手部舵机
     has_hands_ = (left_hand != -1 && right_hand != -1);
 
-    AttachServos();
-    is_otto_resting_ = false;
+    if (attach_servos) {
+        AttachServos();
+        is_otto_resting_ = false;
+    } else {
+        is_otto_resting_ = true;
+    }
 }
 
 ///////////////////////////////////////////////////////////////////

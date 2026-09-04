@@ -502,6 +502,16 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32S3
 endchoice
 
+config GOSHA_NO_MOTION_SAFE_PROFILE
+    bool "GOSHA v1 no-motion safe profile"
+    depends on BOARD_TYPE_GOSHA_V1
+    default n
+    help
+        Keeps Wi-Fi, voice, OTA/config, local WebSocket identity/status and battery
+        available while preventing servo attach, boot Home, motion commands, set_trim
+        and servo sequences. Disable this only after a separate hardware admission for
+        motion on gosha-v1.
+
 choice
     depends on BOARD_TYPE_LILYGO_T_DISPLAY_P4
     prompt "Select the screen type"

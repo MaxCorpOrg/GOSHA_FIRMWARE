@@ -20,6 +20,16 @@
 
 #define TAG "OttoController"
 
+namespace {
+
+#ifdef CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE
+constexpr bool kNoMotionSafeProfile = true;
+#else
+constexpr bool kNoMotionSafeProfile = false;
+#endif
+
+}  // namespace
+
 class OttoController {
 private:
     Otto otto_;
@@ -424,6 +434,12 @@ private:
     }
 
     void QueueAction(int action_type, int steps, int speed, int direction, int amount) {
+        if (kNoMotionSafeProfile) {
+            ESP_LOGW(TAG, "Действие %d не поставлено в очередь: включён профиль no-motion",
+                     action_type);
+            return;
+        }
+
         // 检查手部动作
         if ((action_type >= ACTION_HANDS_UP && action_type <= ACTION_HAND_WAVE) || 
             (action_type == ACTION_WINDMILL) || (action_type == ACTION_TAKEOFF) || 
@@ -445,6 +461,11 @@ private:
     }
 
     void QueueServoSequence(const char* servo_sequence_json) {
+        if (kNoMotionSafeProfile) {
+            ESP_LOGW(TAG, "Последовательность сервоприводов не поставлена в очередь: включён профиль no-motion");
+            return;
+        }
+
         if (servo_sequence_json == nullptr) {
             ESP_LOGE(TAG, "JSON последовательности пуст");
             return;
@@ -494,12 +515,13 @@ private:
 public:
     OttoController(const HardwareConfig& hw_config) {
         otto_.Init(
-            hw_config.left_leg_pin, 
-            hw_config.right_leg_pin, 
-            hw_config.left_foot_pin, 
-            hw_config.right_foot_pin, 
+            hw_config.left_leg_pin,
+            hw_config.right_leg_pin,
+            hw_config.left_foot_pin,
+            hw_config.right_foot_pin,
             hw_config.left_hand_pin,
-            hw_config.right_hand_pin
+            hw_config.right_hand_pin,
+            !kNoMotionSafeProfile
         );
 
         has_hands_ = (hw_config.left_hand_pin != GPIO_NUM_NC && hw_config.right_hand_pin != GPIO_NUM_NC);
@@ -513,7 +535,11 @@ public:
 
         action_queue_ = xQueueCreate(10, sizeof(OttoActionParams));
 
-        QueueAction(ACTION_HOME, 1, 1000, 1, 0);  // direction=1表示复位手部
+        if (!kNoMotionSafeProfile) {
+            QueueAction(ACTION_HOME, 1, 1000, 1, 0);  // direction=1表示复位手部
+        } else {
+            ESP_LOGW(TAG, "Профиль no-motion включён: boot Home не запускается");
+        }
 
         RegisterMcpTools();
     }
@@ -523,6 +549,7 @@ public:
 
         ESP_LOGI(TAG, "Начинаю регистрацию инструментов MCP...");
 
+        if (!kNoMotionSafeProfile) {
         // 统一动作工具（除了舵机序列外的所有动作）
         mcp_server.AddTool("self.otto.action",
                            R"TOOLS(Выполняет движение робота Otto.
@@ -802,6 +829,10 @@ hands_up, hands_down, hand_wave, windmill, takeoff, fitness, greeting, shy, radi
                                ESP_LOGI(TAG, "Текущие подстройки сервоприводов: %s", result.c_str());
                                return result;
                            });
+
+        } else {
+            ESP_LOGW(TAG, "Профиль no-motion включён: инструменты движения, Home, set_trim и servo sequence не зарегистрированы");
+        }
 
         mcp_server.AddTool("self.otto.get_status", "Возвращает состояние робота: moving или idle",
                            PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
