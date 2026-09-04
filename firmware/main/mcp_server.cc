@@ -21,6 +21,16 @@
 
 #define TAG "MCP"
 
+namespace {
+
+#ifdef CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE
+constexpr bool kGoshaNoMotionSafeProfile = true;
+#else
+constexpr bool kGoshaNoMotionSafeProfile = false;
+#endif
+
+}  // namespace
+
 McpServer::McpServer() {
 }
 
@@ -150,25 +160,29 @@ void McpServer::AddUserOnlyTools() {
         });
 
     // Firmware upgrade
-    AddUserOnlyTool("self.upgrade_firmware", "Upgrade firmware from a specific URL. This will download and install the firmware, then reboot the device.",
-        PropertyList({
-            Property("url", kPropertyTypeString, "The URL of the firmware binary file to download and install")
-        }),
-        [this](const PropertyList& properties) -> ReturnValue {
-            auto url = properties["url"].value<std::string>();
-            const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(url);
-            ESP_LOGI(TAG, "User requested firmware upgrade from %s", diagnostic_url.c_str());
-            
-            auto& app = Application::GetInstance();
-            app.Schedule([url, &app]() {
-                bool success = app.UpgradeFirmware(url);
-                if (!success) {
-                    ESP_LOGE(TAG, "Firmware upgrade failed");
-                }
+    if (!kGoshaNoMotionSafeProfile) {
+        AddUserOnlyTool("self.upgrade_firmware", "Upgrade firmware from a specific URL. This will download and install the firmware, then reboot the device.",
+            PropertyList({
+                Property("url", kPropertyTypeString, "The URL of the firmware binary file to download and install")
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                auto url = properties["url"].value<std::string>();
+                const auto diagnostic_url = diagnostic_redaction::RedactUrlForDiagnostics(url);
+                ESP_LOGI(TAG, "User requested firmware upgrade from %s", diagnostic_url.c_str());
+
+                auto& app = Application::GetInstance();
+                app.Schedule([url, &app]() {
+                    bool success = app.UpgradeFirmware(url);
+                    if (!success) {
+                        ESP_LOGE(TAG, "Firmware upgrade failed");
+                    }
+                });
+
+                return true;
             });
-            
-            return true;
-        });
+    } else {
+        ESP_LOGW(TAG, "Firmware upgrade MCP tool disabled by no-motion safe profile");
+    }
 
     // Display control
 #ifdef HAVE_LVGL
@@ -513,6 +527,12 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
 }
 
 void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments) {
+    if (kGoshaNoMotionSafeProfile && tool_name == "self.upgrade_firmware") {
+        ESP_LOGW(TAG, "Blocked firmware upgrade MCP call by no-motion safe profile");
+        ReplyError(id, "Firmware upgrade is disabled by the no-motion safe profile");
+        return;
+    }
+
     auto tool_iter = std::find_if(tools_.begin(), tools_.end(), 
                                  [&tool_name](const McpTool* tool) { 
                                      return tool->name() == tool_name; 
