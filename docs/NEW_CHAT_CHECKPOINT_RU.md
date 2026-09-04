@@ -4,6 +4,54 @@
 > `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`; прежние запреты ниже являются
 > историческими.
 
+## Voice turn phase emission PR48 2026-09-04
+
+- Статическая правка prepared head
+  `f1fdb89d508217134ccc91c03358e43c9809137c` добавляет прошивочную часть
+  контракта платформы `gosha.runtime.event.v1` с
+  `event_type="voice.turn.phase"`.
+- Реальный голосовой путь зафиксирован так: wake word, то есть слово
+  пробуждения, приходит из `AudioService` в `Application`;
+  `user_speech_start` и `user_speech_end` берутся только из VAD, то есть
+  обнаружения речи аудиопроцессором; серверный `tts start` лишь переводит
+  устройство в `kDeviceStateSpeaking`; фактический звук подтверждается только
+  в `AudioService::AudioOutputTask()` после первого `codec_->OutputData(...)`
+  для удалённого аудиопакета.
+- Прошивка публикует только доказанные фазы: `wake_detected`,
+  `user_speech_start`, `user_speech_end`, `robot_first_audio_out` и
+  `turn_failed` при отказе открытия/сети голосового канала с активным turn.
+  `turn_complete` не добавлен, потому что текущий протокол не даёт прошивке
+  физически точной границы полного завершения серверного turn.
+- На один turn создаются стабильные ограниченные по длине `correlation_id` и `task.id`.
+  Источник — `esp_random()` и локальный счётчик, а не `MAC`, `IP`, raw device
+  id, серверный `session_id`, URL, token, SSID, transcript, prompt или raw
+  audio. В объекте `voice` остаются только `phase` и `warm_state`;
+  `robot_first_audio_out` отправляется с `source.kind="robot"`.
+- Локальные звуки `PlaySound()` и тестовое аудио помечены
+  `AudioStreamSource::kLocal`, поэтому они не могут вызвать
+  `robot_first_audio_out`; аудиопакеты протокола остаются
+  `AudioStreamSource::kRemote`.
+- На закрытии аудиоканала reset turn идёт после
+  `audio_service_.WaitForPlaybackQueueEmpty()`, чтобы уже поставленное в очередь
+  удалённое аудио не потеряло первый фактический `codec_->OutputData(...)`.
+- Добавлен `firmware/scripts/check_voice_turn_phase_events.py --self-test` и
+  подключён к `scripts/release.py` для `gosha-v1` до чтения owner-only
+  `GOSHA_OTA_URL`. Проверка покрывает одноразовый первый аудиовыход, сброс turn,
+  отсутствие чувствительных полей и сохранение no-motion guard.
+- Проверки без устройства: `python3 scripts/check_voice_turn_phase_events.py
+  --self-test`, `python3 scripts/check_gosha_v1_no_motion_profile.py
+  --self-test`, `python3 scripts/check_gosha_v1_pinmap.py --self-test`,
+  `python3 scripts/check_gosha_v1_gpio3_audio_contract.py --self-test`,
+  `python3 scripts/check_sensitive_logging.py`, `python3 -m py_compile ...`,
+  `python3 scripts/release.py --list-boards --json`, `git diff --check`.
+  `python3 scripts/release.py gosha-v1 --name gosha-v1` прошёл все статические
+  проверки и ожидаемо остановился на отсутствующем `GOSHA_OTA_URL`.
+- Compile smoke, то есть пробная сборка, не выполнялся: в контейнере и
+  доступном host-пути нет `idf.py` и `ESP-IDF export.sh`. Аппаратные действия
+  не выполнялись: USB/serial,
+  flash, reboot, update, raw `:8080/ws`, motion, `Home`, `set_trim`, servo
+  sequence, OTA/assets writes, live endpoint и credentials не использовались.
+
 ## No-motion профиль `gosha-v1` 2026-09-04
 
 - Ветка `codex/firmware-no-motion-safe-profile-20260904` от exact

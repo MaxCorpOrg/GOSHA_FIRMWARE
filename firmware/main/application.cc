@@ -13,7 +13,9 @@
 #include "diagnostic_redaction.h"
 
 #include <cstring>
+#include <cstdio>
 #include <esp_log.h>
+#include <esp_random.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
@@ -66,6 +68,132 @@ Application::~Application() {
     vEventGroupDelete(event_group_);
 }
 
+const char* Application::GetCurrentVoiceWarmState() const {
+    return protocol_ != nullptr && protocol_->IsAudioChannelOpened() ? "warm" : "cold";
+}
+
+void Application::StartVoiceTurnLocked(const char* warm_state) {
+    const uint32_t turn_counter = ++voice_turn_counter_;
+    const uint32_t random_value = esp_random();
+
+    char correlation_id[32];
+    char task_id[32];
+    snprintf(correlation_id, sizeof(correlation_id), "fw-turn-%08lx-%04lx",
+             static_cast<unsigned long>(random_value),
+             static_cast<unsigned long>(turn_counter & 0xffff));
+    snprintf(task_id, sizeof(task_id), "fw-task-%08lx-%04lx",
+             static_cast<unsigned long>(random_value),
+             static_cast<unsigned long>(turn_counter & 0xffff));
+
+    voice_turn_ = VoiceTurnState{};
+    voice_turn_.active = true;
+    voice_turn_.warm_state = (warm_state != nullptr && warm_state[0] != '\0') ? warm_state : "cold";
+    voice_turn_.correlation_id = correlation_id;
+    voice_turn_.task_id = task_id;
+}
+
+void Application::EnsureVoiceTurnStarted(const char* warm_state) {
+    std::lock_guard<std::mutex> lock(voice_turn_mutex_);
+    if (!voice_turn_.active ||
+        (voice_turn_.tts_stop_seen && voice_turn_.first_audio_out_reported && !voice_turn_.user_speech_active)) {
+        StartVoiceTurnLocked(warm_state);
+    }
+}
+
+void Application::ResetVoiceTurnLocked() {
+    voice_turn_ = VoiceTurnState{};
+}
+
+void Application::ResetVoiceTurn() {
+    std::lock_guard<std::mutex> lock(voice_turn_mutex_);
+    ResetVoiceTurnLocked();
+}
+
+void Application::PublishVoiceTurnPhaseLocked(const char* phase) {
+    if (!voice_turn_.active) {
+        return;
+    }
+    RuntimeEventReporter::GetInstance().PublishVoiceTurnPhase(
+        phase,
+        voice_turn_.warm_state.c_str(),
+        voice_turn_.correlation_id,
+        voice_turn_.task_id);
+}
+
+void Application::ReportWakeDetected() {
+    const char* warm_state = GetCurrentVoiceWarmState();
+    std::lock_guard<std::mutex> lock(voice_turn_mutex_);
+    StartVoiceTurnLocked(warm_state);
+    PublishVoiceTurnPhaseLocked("wake_detected");
+}
+
+void Application::ReportUserSpeechChange(bool speaking) {
+    std::lock_guard<std::mutex> lock(voice_turn_mutex_);
+    if (!voice_turn_.active) {
+        if (!speaking) {
+            return;
+        }
+        StartVoiceTurnLocked("warm");
+    } else if (speaking && voice_turn_.tts_stop_seen &&
+               voice_turn_.first_audio_out_reported && !voice_turn_.user_speech_active) {
+        StartVoiceTurnLocked("warm");
+    }
+
+    if (speaking) {
+        if (voice_turn_.user_speech_active) {
+            return;
+        }
+        voice_turn_.user_speech_active = true;
+        PublishVoiceTurnPhaseLocked("user_speech_start");
+        return;
+    }
+
+    if (!voice_turn_.user_speech_active) {
+        return;
+    }
+    voice_turn_.user_speech_active = false;
+    PublishVoiceTurnPhaseLocked("user_speech_end");
+}
+
+void Application::ReportRobotFirstAudioOutput() {
+    std::lock_guard<std::mutex> lock(voice_turn_mutex_);
+    if (!voice_turn_.active) {
+        return;
+    }
+    if (voice_turn_.first_audio_out_reported) {
+        return;
+    }
+
+    voice_turn_.first_audio_out_reported = true;
+    PublishVoiceTurnPhaseLocked("robot_first_audio_out");
+}
+
+void Application::MarkVoiceTurnTtsStart() {
+    std::lock_guard<std::mutex> lock(voice_turn_mutex_);
+    if (!voice_turn_.active ||
+        (voice_turn_.tts_stop_seen && voice_turn_.first_audio_out_reported && !voice_turn_.user_speech_active)) {
+        StartVoiceTurnLocked("warm");
+    }
+    voice_turn_.tts_stop_seen = false;
+}
+
+void Application::MarkVoiceTurnTtsStop() {
+    std::lock_guard<std::mutex> lock(voice_turn_mutex_);
+    if (!voice_turn_.active) {
+        return;
+    }
+    voice_turn_.tts_stop_seen = true;
+}
+
+void Application::FailVoiceTurnIfActive() {
+    std::lock_guard<std::mutex> lock(voice_turn_mutex_);
+    if (!voice_turn_.active) {
+        return;
+    }
+    PublishVoiceTurnPhaseLocked("turn_failed");
+    ResetVoiceTurnLocked();
+}
+
 bool Application::SetDeviceState(DeviceState state) {
     return state_machine_.TransitionTo(state);
 }
@@ -91,10 +219,15 @@ void Application::Initialize() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_SEND_AUDIO);
     };
     callbacks.on_wake_word_detected = [this](const std::string& wake_word) {
+        (void)wake_word;
         xEventGroupSetBits(event_group_, MAIN_EVENT_WAKE_WORD_DETECTED);
     };
     callbacks.on_vad_change = [this](bool speaking) {
+        ReportUserSpeechChange(speaking);
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
+    };
+    callbacks.on_remote_audio_output = [this]() {
+        ReportRobotFirstAudioOutput();
     };
     audio_service_.SetCallbacks(callbacks);
 
@@ -237,6 +370,7 @@ void Application::Run() {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
 
         if (bits & MAIN_EVENT_ERROR) {
+            FailVoiceTurnIfActive();
             SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, last_error_message_.c_str(), "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
         }
@@ -562,6 +696,7 @@ void Application::InitializeProtocol() {
 
     protocol_->OnNetworkError([this](const std::string& message) {
         last_error_message_ = message;
+        FailVoiceTurnIfActive();
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
     });
     
@@ -582,9 +717,11 @@ void Application::InitializeProtocol() {
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
+            audio_service_.WaitForPlaybackQueueEmpty();
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
+            ResetVoiceTurn();
         });
     });
     
@@ -595,6 +732,7 @@ void Application::InitializeProtocol() {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
+                    MarkVoiceTurnTtsStart();
                     aborted_ = false;
                     SetDeviceState(kDeviceStateSpeaking);
                 });
@@ -607,6 +745,7 @@ void Application::InitializeProtocol() {
                             SetDeviceState(kDeviceStateListening);
                         }
                     }
+                    MarkVoiceTurnTtsStop();
                 });
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
                 auto text = cJSON_GetObjectItem(root, "text");
@@ -768,6 +907,7 @@ void Application::HandleToggleChatEvent() {
 
     if (state == kDeviceStateIdle) {
         ListeningMode mode = GetDefaultListeningMode();
+        EnsureVoiceTurnStarted(GetCurrentVoiceWarmState());
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
             // Schedule to let the state change be processed first (UI update)
@@ -792,6 +932,7 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
 
     if (!protocol_->IsAudioChannelOpened()) {
         if (!protocol_->OpenAudioChannel()) {
+            FailVoiceTurnIfActive();
             return;
         }
     }
@@ -817,6 +958,7 @@ void Application::HandleStartListeningEvent() {
     }
     
     if (state == kDeviceStateIdle) {
+        EnsureVoiceTurnStarted(GetCurrentVoiceWarmState());
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
             // Schedule to let the state change be processed first (UI update)
@@ -848,13 +990,15 @@ void Application::HandleStopListeningEvent() {
 }
 
 void Application::HandleWakeWordDetectedEvent() {
-    if (!protocol_) {
-        return;
-    }
-
     auto state = GetDeviceState();
     auto wake_word = audio_service_.GetLastWakeWord();
     ESP_LOGI(TAG, "Wake word detected: %s (state: %d)", wake_word.c_str(), (int)state);
+    ReportWakeDetected();
+
+    if (!protocol_) {
+        FailVoiceTurnIfActive();
+        return;
+    }
 
     if (state == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
@@ -890,6 +1034,9 @@ void Application::HandleWakeWordDetectedEvent() {
     } else if (state == kDeviceStateActivating) {
         // Restart the activation check if the wake word is detected during activation
         SetDeviceState(kDeviceStateIdle);
+        FailVoiceTurnIfActive();
+    } else {
+        FailVoiceTurnIfActive();
     }
 }
 
@@ -901,6 +1048,7 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
 
     if (!protocol_->IsAudioChannelOpened()) {
         if (!protocol_->OpenAudioChannel()) {
+            FailVoiceTurnIfActive();
             audio_service_.EnableWakeWordDetection(true);
             return;
         }
@@ -1097,11 +1245,13 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
+    auto state = GetDeviceState();
+    ReportWakeDetected();
+
     if (!protocol_) {
+        FailVoiceTurnIfActive();
         return;
     }
-
-    auto state = GetDeviceState();
     
     if (state == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
@@ -1126,6 +1276,8 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
                 protocol_->CloseAudioChannel();
             }
         });
+    } else {
+        FailVoiceTurnIfActive();
     }
 }
 

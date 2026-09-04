@@ -6,6 +6,60 @@
 > servo sequence требуют отдельной явной команды владельца. Более ранние
 > запреты ниже сохраняют только историю соответствующих проверок.
 
+## Voice turn phase emission PR48 2026-09-04
+
+- Рабочая задача `task-20260904-gosha-firmware-pr48-voice-turn-phase-emission`
+  выполнялась в выделенном workspace `/workspace` поверх синтетического
+  локального `master`; канонический prepared head задачи —
+  `f1fdb89d508217134ccc91c03358e43c9809137c`. Commit, push, rebase и PR не
+  выполнялись на worker: изменения оставлены незакоммиченными для central.
+- В `RuntimeEventReporter` добавлен отдельный построитель JSON
+  `BuildVoiceTurnPhaseEvent()` для `event_type="voice.turn.phase"`. Он
+  сохраняет схему `gosha.runtime.event.v1`, ставит `source.kind="robot"`,
+  кладёт `correlation_id` в `trace`, `task.id` в `task` и в объект `voice`
+  добавляет только `phase` и `warm_state`.
+- В `Application` добавлено локальное состояние одного голосового turn:
+  ограниченные по длине `correlation_id` и `task.id`, `warm_state`, признак активной
+  речи пользователя, одноразовый флаг первого аудиовыхода и признак
+  полученного `tts stop`. Идентификаторы создаются из `esp_random()` и
+  локального счётчика, а не из raw device id, `MAC`, `IP`, URL, token, SSID,
+  transcript, prompt, raw audio или серверного `session_id`.
+- Публикуемые фазы ограничены тем, что прошивка может доказать:
+  `wake_detected` при обработке слова пробуждения, `user_speech_start` и
+  `user_speech_end` из VAD, `robot_first_audio_out` после первого фактического
+  `codec_->OutputData(...)` для удалённого аудио, `turn_failed` только при
+  активном turn и отказе открытия/сети голосового канала. `turn_complete` не
+  добавлен, потому что текущая прошивка не имеет физически точной границы
+  полного завершения серверного turn.
+- В `AudioService` добавлен признак `AudioStreamSource`: аудио от протокола
+  остаётся `kRemote`, а локальные `PlaySound()` и тестовое аудио помечены
+  `kLocal`; обратный вызов `on_remote_audio_output` вызывается после
+  `codec_->OutputData(...)` только для `kRemote`, поэтому локальный служебный звук
+  не засчитывается как `robot_first_audio_out`.
+- На закрытии аудиоканала reset turn выполняется после
+  `audio_service_.WaitForPlaybackQueueEmpty()`, чтобы удалённое аудио из очереди
+  успело дать доказанный первый `codec_->OutputData(...)`.
+- No-motion профиль не ослаблен: новые вспомогательные функции не вызывают `QueueAction`,
+  `QueueServoSequence`, `AttachServos`, `ACTION_HOME`, `UpgradeFirmware`,
+  `Reboot`, `Assets::Download`, `set_trim` или `servo_sequences`; существующий
+  no-motion guard остался в `release.py`.
+- Добавлена статическая проверка
+  `firmware/scripts/check_voice_turn_phase_events.py --self-test`; она
+  проверяет одноразовый первый аудиовыход, сброс turn, отсутствие
+  чувствительных данных и сохранение no-motion инвариантов. `release.py`
+  запускает её для `gosha-v1` до owner-only `GOSHA_OTA_URL`.
+- Проверки без устройства прошли: новая проверка voice turn с `--self-test`,
+  no-motion guard, pin map guard, GPIO3/audio-contract guard, sensitive logging
+  guard, `py_compile`, `scripts/release.py --list-boards --json`,
+  `git diff --check`. `scripts/release.py gosha-v1 --name gosha-v1` дошёл до
+  всех статических проверок и ожидаемо остановился на отсутствующем owner-only
+  `GOSHA_OTA_URL`.
+- Compile smoke, то есть пробная сборка, не выполнялся, потому что в
+  контейнере и доступном host-пути не найден `idf.py` или `ESP-IDF export.sh`.
+  USB/serial, flash, reboot, update, raw WebSocket, live endpoint, credentials,
+  motion, `Home`,
+  `set_trim`, servo sequence и OTA/assets writes не выполнялись.
+
 ## No-motion профиль `gosha-v1` 2026-09-04
 
 - Рабочая ветка `codex/firmware-no-motion-safe-profile-20260904` стартовала от

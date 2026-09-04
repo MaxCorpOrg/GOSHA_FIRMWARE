@@ -4,6 +4,44 @@
 
 ## Самая свежая статическая точка
 
+- `2026-09-04` PR48 voice turn phase emission подготовлен статически поверх
+  prepared head `f1fdb89d508217134ccc91c03358e43c9809137c`: прошивка
+  публикует `event_type="voice.turn.phase"` в схеме
+  `gosha.runtime.event.v1` только на доказанных локальных границах голосового
+  turn, то есть одного цикла речи пользователя и ответа робота.
+- Фазы: `wake_detected` при обработке обнаруженного слова пробуждения,
+  `user_speech_start` и `user_speech_end` из VAD, то есть обнаружения речи в
+  аудиопроцессоре, `robot_first_audio_out` только после первого фактического
+  `codec_->OutputData(...)` для аудио от сервера. Локальные `OGG`-сигналы и
+  тестовое аудио помечены как `AudioStreamSource::kLocal` и не запускают
+  `robot_first_audio_out`.
+- На один turn генерируются ограниченные по длине,
+  не секретные `correlation_id` и `task.id` из `esp_random()` и локального
+  счётчика; они не используют `MAC`, `IP`, raw device id, серверный
+  `session_id`, URL, token, SSID, transcript, prompt или raw audio. В объекте
+  `voice` есть только `phase` и `warm_state`; для первого аудиовыхода источник
+  события имеет `source.kind="robot"`. `turn_failed` публикуется только при
+  активном turn и отказе открытия/сети голосового канала; `turn_complete`
+  намеренно не добавлен, потому что прошивка без нового протокольного
+  подтверждения не доказывает полный конец серверного turn.
+- Добавлена статическая проверка
+  `firmware/scripts/check_voice_turn_phase_events.py --self-test`; она
+  проверяет одноразовый первый аудиовыход, сброс turn, отсутствие
+  чувствительных данных и сохранение no-motion инвариантов. `release.py`
+  запускает эту проверку для `gosha-v1` до owner-only `GOSHA_OTA_URL`.
+- Проверки без устройства прошли: новая проверка voice turn с `--self-test`, no-motion
+  guard, pin map guard, GPIO3/audio guard, sensitive logging guard,
+  `py_compile`, `scripts/release.py --list-boards --json`, `git diff --check`.
+  `scripts/release.py gosha-v1 --name gosha-v1` дошёл через все статические проверки и
+  ожидаемо остановился на отсутствующем owner-only `GOSHA_OTA_URL`. Compile
+  smoke, то есть пробная сборка, не выполнялся: в контейнере и доступном
+  host-пути не найден `idf.py` или `ESP-IDF export.sh`. USB/serial, flash,
+  reboot, update, raw
+  `:8080/ws`, motion, `Home`, `set_trim`, servo sequence, OTA/assets writes,
+  live endpoint и credentials не использовались.
+- При закрытии аудиоканала reset голосового turn выполняется только после
+  `audio_service_.WaitForPlaybackQueueEmpty()`, чтобы уже поставленное в очередь
+  удалённое аудио не потеряло свой первый фактический `codec_->OutputData(...)`.
 - `2026-09-04` дополнение Issue `#47` для Draft PR `#44` закрывает оставшийся
   риск живой записи ресурсов в no-motion профиле. При
   `CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y` MCP-инструмент
