@@ -37,7 +37,7 @@ public:
 
     //-- Otto initialization
     void Init(int left_leg, int right_leg, int left_foot, int right_foot, int left_hand = -1,
-              int right_hand = -1);
+              int right_hand = -1, bool attach_servos = true);
     //-- Attach & detach functions
     void AttachServos();
     void DetachServos();
