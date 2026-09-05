@@ -172,7 +172,10 @@ void AudioService::Initialize(AudioCodec* codec) {
 }
 
 void AudioService::Start() {
-    service_stopped_ = false;
+    {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        service_stopped_ = false;
+    }
     xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING);
 
     esp_timer_start_periodic(audio_power_timer_, 1000000);
@@ -217,16 +220,19 @@ void AudioService::Start() {
 
 void AudioService::Stop() {
     esp_timer_stop(audio_power_timer_);
-    service_stopped_ = true;
     xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
         AS_EVENT_WAKE_WORD_RUNNING |
         AS_EVENT_AUDIO_PROCESSOR_RUNNING);
 
-    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-    audio_encode_queue_.clear();
-    audio_decode_queue_.clear();
-    audio_playback_queue_.clear();
-    audio_testing_queue_.clear();
+    {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        service_stopped_ = true;
+        playback_drain_tracker_.CancelQueuedPlayback();
+        audio_encode_queue_.clear();
+        audio_decode_queue_.clear();
+        audio_playback_queue_.clear();
+        audio_testing_queue_.clear();
+    }
     audio_queue_cv_.notify_all();
 }
 
@@ -346,6 +352,7 @@ void AudioService::AudioOutputTask() {
 
         auto task = std::move(audio_playback_queue_.front());
         audio_playback_queue_.pop_front();
+        playback_drain_tracker_.BeginPlayback();
         audio_queue_cv_.notify_all();
         lock.unlock();
 
@@ -355,21 +362,37 @@ void AudioService::AudioOutputTask() {
             codec_->EnableOutput(true);
         }
         codec_->OutputData(task->pcm);
-        if (task->source == AudioStreamSource::kRemote && callbacks_.on_remote_audio_output) {
-            callbacks_.on_remote_audio_output();
+
+        std::function<void(void)> remote_audio_output_callback;
+        {
+            std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+            if (!service_stopped_ &&
+                playback_drain_tracker_.IsCurrent(task->playback_generation) &&
+                task->source == AudioStreamSource::kRemote &&
+                callbacks_.on_remote_audio_output) {
+                remote_audio_output_callback = callbacks_.on_remote_audio_output;
+            }
+        }
+        if (remote_audio_output_callback) {
+            remote_audio_output_callback();
         }
 
-        /* Update the last output time */
-        last_output_time_ = std::chrono::steady_clock::now();
-        debug_statistics_.playback_count++;
+        {
+            std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+            /* Update the last output time */
+            last_output_time_ = std::chrono::steady_clock::now();
+            debug_statistics_.playback_count++;
 
 #if CONFIG_USE_SERVER_AEC
-        /* Record the timestamp for server AEC */
-        if (task->timestamp > 0) {
-            lock.lock();
-            timestamp_queue_.push_back(task->timestamp);
-        }
+            /* Record the timestamp for server AEC */
+            if (task->timestamp > 0 && !service_stopped_ &&
+                playback_drain_tracker_.IsCurrent(task->playback_generation)) {
+                timestamp_queue_.push_back(task->timestamp);
+            }
 #endif
+            playback_drain_tracker_.FinishPlayback();
+        }
+        audio_queue_cv_.notify_all();
     }
 
     ESP_LOGW(TAG, "Audio output task stopped");
@@ -391,14 +414,17 @@ void AudioService::OpusCodecTask() {
         if (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE) {
             auto packet = std::move(audio_decode_queue_.front());
             audio_decode_queue_.pop_front();
+            const uint32_t playback_generation = playback_drain_tracker_.BeginDecode();
             audio_queue_cv_.notify_all();
             lock.unlock();
 
             auto task = std::make_unique<AudioTask>();
             task->type = kAudioTaskTypeDecodeToPlaybackQueue;
             task->timestamp = packet->timestamp;
+            task->playback_generation = playback_generation;
             task->source = packet->source;
 
+            bool decoded = false;
             SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
             if (opus_decoder_ != nullptr) {
                 task->pcm.resize(decoder_frame_size_);
@@ -418,6 +444,7 @@ void AudioService::OpusCodecTask() {
                 auto ret = esp_opus_dec_decode(opus_decoder_, &raw, &out_frame, &dec_info);
                 decoder_lock.unlock();
                 if (ret == ESP_AUDIO_ERR_OK) {
+                    decoded = true;
                     task->pcm.resize(out_frame.decoded_size / sizeof(int16_t));
                     if (decoder_sample_rate_ != codec_->output_sample_rate() && output_resampler_ != nullptr) {
                         uint32_t target_size = 0;
@@ -429,19 +456,24 @@ void AudioService::OpusCodecTask() {
                         resampled.resize(actual_output);
                         task->pcm = std::move(resampled);
                     }
-                    lock.lock();
-                    audio_playback_queue_.push_back(std::move(task));
-                    audio_queue_cv_.notify_all();
-                    debug_statistics_.decode_count++;
                 } else {
                     ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);
-                    lock.lock();
                 }
             } else {
                 ESP_LOGE(TAG, "Audio decoder is not configured");
-                lock.lock();
             }
-            debug_statistics_.decode_count++;
+            lock.lock();
+            playback_drain_tracker_.FinishDecode();
+            if (decoded) {
+                debug_statistics_.decode_count++;
+                if (!service_stopped_ && playback_drain_tracker_.IsCurrent(playback_generation)) {
+                    audio_playback_queue_.push_back(std::move(task));
+                }
+            }
+            audio_queue_cv_.notify_all();
+        }
+        if (service_stopped_) {
+            continue;
         }
         /* Encode the audio to send queue */
         if (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) {
@@ -783,27 +815,39 @@ void AudioService::PlaySound(const std::string_view& ogg) {
 
 bool AudioService::IsIdle() {
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-    return audio_encode_queue_.empty() && audio_decode_queue_.empty() && audio_playback_queue_.empty() && audio_testing_queue_.empty();
+    return playback_drain_tracker_.IsIdle(
+        audio_encode_queue_.empty(),
+        audio_decode_queue_.empty(),
+        audio_playback_queue_.empty(),
+        audio_testing_queue_.empty());
 }
 
 void AudioService::WaitForPlaybackQueueEmpty() {
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
     audio_queue_cv_.wait(lock, [this]() { 
-        return service_stopped_ || (audio_decode_queue_.empty() && audio_playback_queue_.empty()); 
+        return service_stopped_ ||
+            playback_drain_tracker_.IsPlaybackDrained(
+                audio_decode_queue_.empty(), audio_playback_queue_.empty());
     });
 }
 
 void AudioService::ResetDecoder() {
-    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    std::unique_lock<std::mutex> lock(audio_queue_mutex_);
+    playback_drain_tracker_.CancelQueuedPlayback();
+    timestamp_queue_.clear();
+    audio_decode_queue_.clear();
+    audio_playback_queue_.clear();
+    audio_testing_queue_.clear();
+    audio_queue_cv_.notify_all();
+    audio_queue_cv_.wait(lock, [this]() {
+        return service_stopped_ || !playback_drain_tracker_.HasInFlight();
+    });
+
     std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
     if (opus_decoder_ != nullptr) {
         esp_opus_dec_reset(opus_decoder_);
     }
     decoder_lock.unlock();
-    timestamp_queue_.clear();
-    audio_decode_queue_.clear();
-    audio_playback_queue_.clear();
-    audio_testing_queue_.clear();
     audio_queue_cv_.notify_all();
 }
 

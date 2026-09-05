@@ -4,6 +4,46 @@
 
 ## Самая свежая статическая точка
 
+- `2026-09-05` follow-up по принятому review PR51 выполнен в worker поверх
+  exact base `502678170e5525774f5663b1533b4d4fa915ba17` ветки
+  `ai-office/coder/issue-50-firmware-pr48-privacy-safe-voice-turn-phase-emission`.
+  Исходная точка PR48 остаётся отдельной: prepared head
+  `f1fdb89d508217134ccc91c03358e43c9809137c`. Worker не создавал `commit`,
+  `push`, `rebase` или PR; текущий результат — незакоммиченный scoped diff для
+  центрального workflow.
+- Закрыт P1 review PR51 по drain, то есть ожиданию полного опустошения
+  аудиовывода: `AudioOutputTask` и `OpusCodecTask` теперь учитывают in-flight
+  decode/output через общий `AudioPlaybackDrainTracker`. `WaitForPlaybackQueueEmpty()`
+  больше не считает playback завершённым, если очереди уже пустые, но decode или
+  `codec_->OutputData(...)` ещё выполняются. `ResetDecoder()` и `Stop()`
+  отменяют поколение queued playback, а `ResetDecoder()` дополнительно ждёт
+  завершения in-flight работ перед сбросом декодера. Это не даёт старым
+  decode/output после reset поставить звук обратно в очередь или вызвать
+  `on_remote_audio_output`.
+- Добавлен поведенческий host regression test
+  `firmware/scripts/audio_playback_drain_host_test.cc` и runner
+  `firmware/scripts/run_host_behavior_tests.py`. Тест проверяет empty queue при
+  in-flight decode/output, порядок `on_remote_audio_output` до drain и teardown
+  при stop на реальных `std::mutex` и `std::condition_variable`, без grep и без копии
+  production-реализации.
+- Добавлен активный CI workflow
+  `.github/workflows/firmware-stacked-ci.yml` для промежуточного stacked PR, то
+  есть PR поверх предыдущей ветки. Он запускает no-motion/OTA/reboot/assets
+  guard, voice guard, остальные firmware guards, host behavioral tests и
+  каноническую сборку `gosha-v1` в контейнере ESP-IDF `5.5.2` с
+  `GOSHA_OTA_URL=https://example.invalid/gosha-v1/ota`; production endpoint и
+  secrets не нужны и не печатаются. Существующий imported workflow
+  `firmware/.github/workflows/build.yml` синхронизирован с теми же guard-ами,
+  stacked PR base и reserved `example.invalid`.
+- Проверки на worker без устройства: pin map guard, GPIO3/audio guard,
+  no-motion guard, voice guard, sensitive logging guard, `py_compile`,
+  `scripts/release.py --list-boards --json`. Каноническая команда с
+  `example.invalid` дошла до static guards и остановилась на `idf.py: not found`;
+  C++ host runner остановился на отсутствии компилятора. Поэтому worker не
+  объявляет локальную host binary или firmware build успешными. USB/serial,
+  flash, reboot, update, motion, `Home`, `set_trim`, servo sequence, deployment,
+  iOS и safe-neutral профиль не трогались.
+
 - `2026-09-04` PR48 voice turn phase emission подготовлен статически поверх
   prepared head `f1fdb89d508217134ccc91c03358e43c9809137c`: прошивка
   публикует `event_type="voice.turn.phase"` в схеме

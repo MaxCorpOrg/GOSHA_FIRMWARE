@@ -4,6 +4,55 @@
 > `docs/HARDWARE_DEVELOPMENT_POLICY_RU.md`; прежние запреты ниже являются
 > историческими.
 
+## Voice drain follow-up PR51 2026-09-05
+
+- Текущий fixer-task `task-20260905-gosha-firmware-voice-drain-ci` выполнен в
+  worker поверх exact base
+  `502678170e5525774f5663b1533b4d4fa915ba17` ветки
+  `ai-office/coder/issue-50-firmware-pr48-privacy-safe-voice-turn-phase-emission`.
+  Это не новый опубликованный `commit`: worker не выполнял `commit`, `push`,
+  `rebase` или PR. Центральный workflow должен принять незакоммиченный scoped diff.
+- Исходная PR48-точка остаётся отдельным фактом:
+  `f1fdb89d508217134ccc91c03358e43c9809137c` добавил privacy-safe
+  `voice.turn.phase` события. PR51 review нашёл P1 в drain-координации и P2 в
+  документации, где нельзя было смешивать исходный PR48/PR51 и текущий результат
+  как будто у него уже есть будущий самоссылочный `commit`.
+- P1 закрыт в `AudioService`: введён `AudioPlaybackDrainTracker`, который под
+  тем же `audio_queue_mutex_` учитывает in-flight decode и output. При
+  извлечении последнего decode/output элемента очередь может стать пустой, но
+  `WaitForPlaybackQueueEmpty()` теперь ждёт завершения самой работы и
+  `on_remote_audio_output` до сброса voice turn. `ResetDecoder()` и `Stop()`
+  отменяют поколение queued playback, а `ResetDecoder()` дополнительно ждёт
+  завершения in-flight работ перед сбросом декодера. Это закрывает старую работу
+  после сброса.
+- Добавлены `firmware/scripts/audio_playback_drain_host_test.cc` и
+  `firmware/scripts/run_host_behavior_tests.py`. Host test проверяет реальные
+  `std::mutex` и `std::condition_variable`: пустую очередь при in-flight decode,
+  пустую очередь при in-flight output, `on_remote_audio_output` до drain,
+  reset старых decode/output и teardown через stop.
+- Добавлен активный workflow `.github/workflows/firmware-stacked-ci.yml` для
+  промежуточного stacked PR, то есть PR поверх предыдущей ветки. CI запускает
+  no-motion guard, который удерживает OTA/reboot/assets запреты, voice guard,
+  pin map, GPIO3/audio, sensitive logging, host behavioral tests и
+  каноническую сборку `gosha-v1` в `espressif/idf:v5.5.2` с
+  `GOSHA_OTA_URL=https://example.invalid/gosha-v1/ota`. Существующий imported
+  workflow `firmware/.github/workflows/build.yml` синхронизирован с теми же
+  guard-ами, stacked PR base и reserved `example.invalid`.
+- Проверки worker без устройства прошли: `python3 scripts/check_gosha_v1_pinmap.py
+  --self-test`, `python3 scripts/check_gosha_v1_gpio3_audio_contract.py
+  --self-test`, `python3 scripts/check_gosha_v1_no_motion_profile.py
+  --self-test`, `python3 scripts/check_voice_turn_phase_events.py --self-test`,
+  `python3 scripts/check_sensitive_logging.py`, `python3 -m py_compile ...`,
+  `python3 scripts/release.py --list-boards --json`. Команда
+  `GOSHA_OTA_URL=https://example.invalid/gosha-v1/ota python3 scripts/release.py
+  gosha-v1 --name gosha-v1` прошла guards и остановилась на отсутствии `idf.py`;
+  `python3 scripts/run_host_behavior_tests.py` остановился на отсутствии
+  компилятора C++. Worker не объявляет локальный исполняемый host-тест или
+  firmware build успешными.
+- Аппаратные действия не выполнялись: USB/serial, flash, reboot, update,
+  motion, `Home`, `set_trim`, servo sequence, deployment, iOS и safe-neutral
+  профиль вне этой задачи.
+
 ## Voice turn phase emission PR48 2026-09-04
 
 - Статическая правка prepared head
