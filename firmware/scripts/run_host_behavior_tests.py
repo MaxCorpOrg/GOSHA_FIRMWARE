@@ -49,6 +49,10 @@ def main() -> int:
 
     tests = [
         (
+            "runtime_event_clock_host_test",
+            ["scripts/runtime_event_clock_host_test.cc"],
+        ),
+        (
             "audio_playback_drain_host_test",
             ["scripts/audio_playback_drain_host_test.cc"],
         ),

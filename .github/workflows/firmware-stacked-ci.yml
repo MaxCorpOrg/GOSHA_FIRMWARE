@@ -2,9 +2,6 @@ name: Firmware Stacked PR CI
 
 on:
   pull_request:
-    branches:
-      - main
-      - ai-office/coder/issue-50-firmware-pr48-privacy-safe-voice-turn-phase-emission
   push:
     branches:
       - main
@@ -27,6 +24,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Python compile checks
         run: |
@@ -67,6 +66,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Build gosha-v1 with reserved endpoint
         env:
@@ -74,3 +75,14 @@ jobs:
         run: |
           source "$IDF_PATH/export.sh"
           python3 scripts/release.py gosha-v1 --name gosha-v1
+          sha256sum build/gosha.bin > build/gosha.bin.sha256
+
+      - name: Save example app for reproducible validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: gosha-v1-example-${{ github.sha }}
+          path: |
+            firmware/build/gosha.bin
+            firmware/build/gosha.bin.sha256
+          if-no-files-found: error
+          retention-days: 14

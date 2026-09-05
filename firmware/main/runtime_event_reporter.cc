@@ -1,4 +1,5 @@
 #include "runtime_event_reporter.h"
+#include "runtime_event_clock.h"
 
 #include "board.h"
 #include "settings.h"
@@ -107,13 +108,10 @@ std::string RuntimeEventReporter::BuildEvent(
     cJSON* trace = cJSON_AddObjectToObject(root, "trace");
     cJSON_AddStringToObject(trace, "session_id", session_id_.c_str());
 
-    const time_t now = time(nullptr);
-    if (now > 1577836800) {
-        struct tm utc = {};
-        gmtime_r(&now, &utc);
-        char occurred_at[32];
-        strftime(occurred_at, sizeof(occurred_at), "%Y-%m-%dT%H:%M:%SZ", &utc);
-        cJSON_AddStringToObject(root, "occurred_at", occurred_at);
+    struct timeval now = {};
+    if (gettimeofday(&now, nullptr) == 0) {
+        const auto occurred_at = FormatRuntimeEventTime(now);
+        AddString(root, "occurred_at", occurred_at.c_str());
     }
 
     cJSON* state = cJSON_AddObjectToObject(root, "state");
@@ -183,13 +181,10 @@ std::string RuntimeEventReporter::BuildVoiceTurnPhaseEvent(
     cJSON* task = cJSON_AddObjectToObject(root, "task");
     AddString(task, "id", task_id.c_str());
 
-    const time_t now = time(nullptr);
-    if (now > 1577836800) {
-        struct tm utc = {};
-        gmtime_r(&now, &utc);
-        char occurred_at[32];
-        strftime(occurred_at, sizeof(occurred_at), "%Y-%m-%dT%H:%M:%SZ", &utc);
-        cJSON_AddStringToObject(root, "occurred_at", occurred_at);
+    struct timeval now = {};
+    if (gettimeofday(&now, nullptr) == 0) {
+        const auto occurred_at = FormatRuntimeEventTime(now);
+        AddString(root, "occurred_at", occurred_at.c_str());
     }
 
     cJSON* voice = cJSON_AddObjectToObject(root, "voice");

@@ -6,9 +6,6 @@ on:
       - main
       - ci/* # for ci test
   pull_request:
-    branches:
-      - main
-      - ai-office/coder/issue-50-firmware-pr48-privacy-safe-voice-turn-phase-emission
 
 permissions:
   contents: read
