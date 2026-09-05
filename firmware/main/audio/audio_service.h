@@ -20,6 +20,7 @@
 
 #include "audio_codec.h"
 #include "audio_processor.h"
+#include "audio_playback_drain_tracker.h"
 #include "processors/audio_debugger.h"
 #include "wake_word.h"
 #include "protocol.h"
@@ -94,6 +95,7 @@ struct AudioTask {
     AudioTaskType type;
     std::vector<int16_t> pcm;
     uint32_t timestamp;
+    uint32_t playback_generation = 0;
     AudioStreamSource source = AudioStreamSource::kRemote;
 };
 
@@ -173,6 +175,7 @@ private:
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_testing_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
+    AudioPlaybackDrainTracker playback_drain_tracker_;
     // For server AEC
     std::deque<uint32_t> timestamp_queue_;
 

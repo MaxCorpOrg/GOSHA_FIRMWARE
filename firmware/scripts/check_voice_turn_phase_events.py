@@ -196,19 +196,57 @@ def validate_audio_service(audio_h: str, audio_cc: str, protocol_h: str) -> None
     require("AudioStreamSource source = AudioStreamSource::kRemote;" in protocol_h, "remote protocol audio must be default packet source")
     require("std::function<void(void)> on_remote_audio_output;" in audio_h, "remote audio output callback is missing")
     require("AudioStreamSource source = AudioStreamSource::kRemote;" in audio_h, "AudioTask must carry audio source")
+    require("uint32_t playback_generation = 0;" in audio_h, "AudioTask must carry playback generation")
+    require("AudioPlaybackDrainTracker playback_drain_tracker_;" in audio_h, "playback drain tracker is missing")
 
     output_body = extract_function_body(audio_cc, "AudioService::AudioOutputTask")
     require_ordered(
         output_body,
         (
+            "playback_drain_tracker_.BeginPlayback();",
             "codec_->OutputData(task->pcm);",
+            "playback_drain_tracker_.IsCurrent(task->playback_generation)",
             "task->source == AudioStreamSource::kRemote",
             "callbacks_.on_remote_audio_output",
-            "callbacks_.on_remote_audio_output();",
+            "remote_audio_output_callback();",
+            "playback_drain_tracker_.FinishPlayback();",
         ),
-        "remote first-audio callback must run at actual codec OutputData",
+        "remote first-audio callback must run during in-flight output after actual codec OutputData",
     )
     require("task->source = packet->source;" in audio_cc, "decode tasks must preserve packet source")
+    require("task->playback_generation = playback_generation;" in audio_cc, "decode tasks must preserve playback generation")
+    require_ordered(
+        extract_function_body(audio_cc, "AudioService::OpusCodecTask"),
+        (
+            "playback_drain_tracker_.BeginDecode();",
+            "esp_opus_dec_decode",
+            "playback_drain_tracker_.FinishDecode();",
+            "playback_drain_tracker_.IsCurrent(playback_generation)",
+            "audio_playback_queue_.push_back(std::move(task));",
+        ),
+        "decode in-flight work must be tracked before it can drain playback",
+    )
+    wait_body = extract_function_body(audio_cc, "AudioService::WaitForPlaybackQueueEmpty")
+    require(
+        "playback_drain_tracker_.IsPlaybackDrained" in wait_body,
+        "WaitForPlaybackQueueEmpty must include decode/output in-flight work",
+    )
+    idle_body = extract_function_body(audio_cc, "AudioService::IsIdle")
+    require("playback_drain_tracker_.IsIdle" in idle_body, "IsIdle must include decode/output in-flight work")
+    reset_body = extract_function_body(audio_cc, "AudioService::ResetDecoder")
+    require(
+        "playback_drain_tracker_.CancelQueuedPlayback();" in reset_body,
+        "ResetDecoder must cancel queued playback generation",
+    )
+    require(
+        "playback_drain_tracker_.HasInFlight()" in reset_body,
+        "ResetDecoder must wait for decode/output in-flight work",
+    )
+    stop_body = extract_function_body(audio_cc, "AudioService::Stop")
+    require(
+        "playback_drain_tracker_.CancelQueuedPlayback();" in stop_body,
+        "Stop must cancel queued playback generation",
+    )
     require(
         audio_cc.count("packet->source = AudioStreamSource::kLocal;") >= 2,
         "local sounds and audio testing packets must not trigger robot_first_audio_out",
@@ -336,6 +374,40 @@ def run_self_test() -> None:
         require("codec OutputData" in str(exc), "remote-source negative test did not name codec OutputData")
     else:
         raise GuardError("remote-source negative test failed: local audio could trigger first audio")
+
+    try:
+        validate_current_tree(
+            reporter_h=reporter_h,
+            reporter_cc=reporter_cc,
+            application_h=application_h,
+            application_cc=application_cc,
+            audio_h=audio_h,
+            audio_cc=audio_cc.replace("playback_drain_tracker_.IsPlaybackDrained", "queues_only_drain", 1),
+            protocol_h=protocol_h,
+            config_json=config_json,
+            release_py=release_py,
+        )
+    except GuardError as exc:
+        require("in-flight" in str(exc), "in-flight drain negative test did not name in-flight work")
+    else:
+        raise GuardError("in-flight drain negative test failed: queue-only drain was accepted")
+
+    try:
+        validate_current_tree(
+            reporter_h=reporter_h,
+            reporter_cc=reporter_cc,
+            application_h=application_h,
+            application_cc=application_cc,
+            audio_h=audio_h,
+            audio_cc=audio_cc.replace("playback_drain_tracker_.BeginPlayback();", "", 1),
+            protocol_h=protocol_h,
+            config_json=config_json,
+            release_py=release_py,
+        )
+    except GuardError as exc:
+        require("in-flight" in str(exc), "output in-flight negative test did not name in-flight work")
+    else:
+        raise GuardError("output in-flight negative test failed: untracked output was accepted")
 
     try:
         validate_current_tree(

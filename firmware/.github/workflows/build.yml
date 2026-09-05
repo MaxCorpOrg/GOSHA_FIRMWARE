@@ -8,13 +8,48 @@ on:
   pull_request:
     branches:
       - main
+      - ai-office/coder/issue-50-firmware-pr48-privacy-safe-voice-turn-phase-emission
 
 permissions:
   contents: read
 
 jobs:
+  host-guards:
+    name: Firmware host guards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python compile checks
+        run: |
+          python3 -m py_compile \
+            scripts/check_gosha_v1_pinmap.py \
+            scripts/check_gosha_v1_gpio3_audio_contract.py \
+            scripts/check_gosha_v1_no_motion_profile.py \
+            scripts/check_voice_turn_phase_events.py \
+            scripts/check_sensitive_logging.py \
+            scripts/release.py \
+            scripts/run_host_behavior_tests.py
+
+      - name: Static firmware guards
+        run: |
+          python3 scripts/check_gosha_v1_pinmap.py --self-test
+          python3 scripts/check_gosha_v1_gpio3_audio_contract.py --self-test
+          python3 scripts/check_gosha_v1_no_motion_profile.py --self-test
+          python3 scripts/check_voice_turn_phase_events.py --self-test
+          python3 scripts/check_sensitive_logging.py
+          python3 scripts/release.py --list-boards --json
+
+      - name: Host behavioral tests
+        run: python3 scripts/run_host_behavior_tests.py
+
+      - name: Whitespace check
+        run: git diff --check
+
   prepare:
     name: Determine variants to build
+    needs: host-guards
     runs-on: ubuntu-latest
     outputs:
       variants: ${{ steps.select.outputs.variants }}
@@ -99,6 +134,8 @@ jobs:
 
       - name: Build current variant
         shell: bash
+        env:
+          GOSHA_OTA_URL: https://example.invalid/gosha-v1/ota
         run: |
           source $IDF_PATH/export.sh
           python scripts/release.py ${{ matrix.board }} --name ${{ matrix.name }}

@@ -6,6 +6,55 @@
 > servo sequence требуют отдельной явной команды владельца. Более ранние
 > запреты ниже сохраняют только историю соответствующих проверок.
 
+## Voice drain follow-up PR51 2026-09-05
+
+- Роль `fixer` закрывала `task-20260905-gosha-firmware-voice-drain-ci` в
+  выделенном workspace `/workspace`. Канонический prepared head задачи:
+  `502678170e5525774f5663b1533b4d4fa915ba17`; локальный `master` остаётся
+  синтетическим baseline AI Office и не является источником provenance.
+  `commit`, `push`, `rebase` и PR на worker не выполнялись.
+- Исходный PR48 результат отдельно зафиксирован как prepared head
+  `f1fdb89d508217134ccc91c03358e43c9809137c` с privacy-safe
+  `voice.turn.phase` событиями. Текущая правка является follow-up по review
+  PR51, а не заменой PR48 и не обещанием заранее известного будущего `commit`.
+- P1 review PR51: `AudioOutputTask` извлекал последний PCM task из
+  `audio_playback_queue_`, а `OpusCodecTask` извлекал последний decode packet из
+  `audio_decode_queue_` до фактического вывода/декодирования. Поэтому
+  `WaitForPlaybackQueueEmpty()` мог увидеть пустые очереди, а
+  `OnAudioChannelClosed` мог выполнить `ResetVoiceTurn()` раньше
+  `ReportRobotFirstAudioOutput()`.
+- Исправление: добавлен `AudioPlaybackDrainTracker` и поле
+  `playback_generation` у `AudioTask`. Decode и output помечаются in-flight под
+  `audio_queue_mutex_` до освобождения mutex, завершаются под тем же mutex и
+  вызывают `audio_queue_cv_.notify_all()`. `WaitForPlaybackQueueEmpty()` и
+  `IsIdle()` теперь учитывают in-flight decode/output. `ResetDecoder()` и
+  `Stop()` отменяют поколение queued playback, а `ResetDecoder()` дополнительно
+  ждёт завершения in-flight работ перед сбросом декодера. Старые decode/output
+  после reset, cancel, error или shutdown не возвращают старый звук и не
+  вызывают `on_remote_audio_output`.
+- Для regression добавлены `firmware/scripts/audio_playback_drain_host_test.cc`
+  и `firmware/scripts/run_host_behavior_tests.py`. Тест использует тот же
+  production helper и реальные `std::mutex`/`std::condition_variable`; он
+  проверяет empty queue при in-flight decode/output, `on_remote_audio_output` до
+  drain, reset старых decode/output и teardown через stop.
+- Добавлен CI workflow `.github/workflows/firmware-stacked-ci.yml` для
+  промежуточного stacked PR, то есть PR поверх предыдущей ветки. Он запускает
+  no-motion guard с OTA/reboot/assets инвариантами, voice guard, pin map,
+  GPIO3/audio, sensitive logging, host behavioral tests и каноническую сборку
+  `gosha-v1` в `espressif/idf:v5.5.2` с
+  `GOSHA_OTA_URL=https://example.invalid/gosha-v1/ota`. Существующий imported
+  workflow `firmware/.github/workflows/build.yml` синхронизирован с теми же
+  guard-ами, stacked PR base и reserved `example.invalid`.
+- Worker-проверки без устройства прошли: pin map guard, GPIO3/audio guard,
+  no-motion guard, voice guard, sensitive logging guard, `py_compile`,
+  `release.py --list-boards --json`. Каноническая команда с `example.invalid`
+  дошла до static guards и остановилась на `idf.py: not found`; host runner
+  остановился на отсутствии компилятора C++. Успешный локальный исполняемый
+  host-тест и firmware build worker не заявляет.
+- USB/serial, flash, reboot, update, raw WebSocket, motion, `Home`, `set_trim`,
+  servo sequence, deployment, iOS и safe-neutral профиль не выполнялись и не
+  менялись.
+
 ## Voice turn phase emission PR48 2026-09-04
 
 - Рабочая задача `task-20260904-gosha-firmware-pr48-voice-turn-phase-emission`
