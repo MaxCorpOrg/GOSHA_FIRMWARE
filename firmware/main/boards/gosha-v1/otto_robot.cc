@@ -275,6 +275,16 @@ public:
 
     OttoCameraType GetCameraType() const { return camera_type_; }
 
+    void SetPowerSaveLevel(PowerSaveLevel level) override {
+#ifdef CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN
+        // Modem sleep can delay LAN commands beyond the 300 ms Live watchdog.
+        // Keep this opt-in maintenance build awake even when voice returns idle.
+        WifiBoard::SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+#else
+        WifiBoard::SetPowerSaveLevel(level);
+#endif
+    }
+
 private:
     void InitializeWebSocketControlServer() {
         ws_control_server_ = new WebSocketControlServer();
@@ -287,6 +297,10 @@ private:
     void StartNetwork() override {
         WifiBoard::StartNetwork();
         vTaskDelay(pdMS_TO_TICKS(1000));
+
+#ifdef CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN
+        SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+#endif
 
         InitializeWebSocketControlServer();
     }

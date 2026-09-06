@@ -17,6 +17,7 @@ WS = ROOT / "main/boards/gosha-v1/websocket_control_server.cc"
 ADAPTER = ROOT / "main/boards/gosha-v1/motion_live_adapter.cc"
 CORE = ROOT / "main/boards/gosha-v1/motion_live_core.cc"
 CORE_H = ROOT / "main/boards/gosha-v1/motion_live_core.h"
+BOARD = ROOT / "main/boards/gosha-v1/otto_robot.cc"
 CONTROLLER = ROOT / "main/boards/gosha-v1/otto_controller.cc"
 MOVEMENTS = ROOT / "main/boards/gosha-v1/otto_movements.cc"
 PREPARE = ROOT / "scripts/prepare_live_profile.py"
@@ -92,6 +93,21 @@ def validate_cmake(cmake: str) -> None:
     require("NOT EXISTS" in cmake, "profile header path existence must be checked")
     require("GOSHA_MOTION_LIVE_PROFILE_HEADER_ENABLED=1" in cmake, "adapter header macro must be opt-in only")
     require("mbedtls" in cmake, "access_key SHA-256 dependency must be declared")
+
+
+def validate_live_wifi(board: str) -> None:
+    body = extract_body(board, r"void\s+SetPowerSaveLevel\s*\([^)]*\)\s*override", "board power policy")
+    require(re.search(
+        r"#ifdef CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN\s+"
+        r"(?:\s*//[^\n]*\n)*\s*"
+        r"WifiBoard::SetPowerSaveLevel\(PowerSaveLevel::PERFORMANCE\);\s*"
+        r"#else\s*WifiBoard::SetPowerSaveLevel\(level\);\s*#endif", body) is not None,
+        "Live opt-in must keep WiFi awake while other builds preserve their power policy")
+    start = extract_body(board, r"void\s+StartNetwork\s*\(\s*\)\s*override", "StartNetwork")
+    policy = "#ifdef CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN\n        SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);\n#endif"
+    require(policy in start and start.index("WifiBoard::StartNetwork()") < start.index(policy)
+            < start.index("InitializeWebSocketControlServer()"),
+            "Live WiFi policy must apply before local WebSocket starts")
 
 
 def validate_websocket(ws: str) -> None:
@@ -273,6 +289,7 @@ def validate_tree(values: dict[str, str]) -> None:
     validate_config(values["config"])
     validate_kconfig(values["kconfig"])
     validate_cmake(values["cmake"])
+    validate_live_wifi(values["board"])
     validate_websocket(values["ws"])
     validate_adapter(values["adapter"])
     validate_core(values["core"], values["core_h"])
@@ -290,6 +307,7 @@ def current_values() -> dict[str, str]:
         "adapter": read(ADAPTER),
         "core": read(CORE),
         "core_h": read(CORE_H),
+        "board": read(BOARD),
         "controller": read(CONTROLLER),
         "movements": read(MOVEMENTS),
         "prepare": read(PREPARE),
@@ -311,6 +329,18 @@ def expect_rejection(values: dict[str, str], key: str, needle: str, replacement:
 def run_self_test() -> None:
     values = current_values()
     validate_tree(values)
+    expect_rejection(
+        values, "board",
+        "WifiBoard::SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);",
+        "WifiBoard::SetPowerSaveLevel(level);",
+        "keep WiFi awake",
+    )
+    expect_rejection(
+        values, "board",
+        "SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);\n#endif\n\n        InitializeWebSocketControlServer();",
+        "// removed pre-server WiFi policy\n#endif\n\n        InitializeWebSocketControlServer();",
+        "before local WebSocket",
+    )
     expect_rejection(
         values,
         "kconfig",
