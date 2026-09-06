@@ -1,6 +1,7 @@
 #include "websocket_control_server.h"
 #include "board.h"
 #include "mcp_server.h"
+#include "motion_live_adapter.h"
 #include "system_info.h"
 #include <esp_app_desc.h>
 #include <esp_log.h>
@@ -12,6 +13,7 @@
 
 static const char* TAG = "WSControl";
 static constexpr uint16_t kWebSocketControlCtrlPort = 32769;
+static constexpr size_t kMaxWebSocketMessageBytes = 4096;
 
 WebSocketControlServer* WebSocketControlServer::instance_ = nullptr;
 
@@ -129,15 +131,23 @@ esp_err_t WebSocketControlServer::ws_handler(httpd_req_t *req) {
     esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "httpd_ws_recv_frame failed to get frame len with %d", ret);
+        instance_->RemoveClient(req);
         return ret;
     }
-    ESP_LOGI(TAG, "frame len is %d", ws_pkt.len);
+    ESP_LOGD(TAG, "frame len is %d", ws_pkt.len);
+
+    if (ws_pkt.len > kMaxWebSocketMessageBytes) {
+        ESP_LOGW(TAG, "WebSocket frame too large: %d bytes", ws_pkt.len);
+        instance_->RemoveClient(req);
+        return ESP_ERR_INVALID_SIZE;
+    }
     
     if (ws_pkt.len) {
         /* ws_pkt.len + 1 is for NULL termination as we are expecting a string */
         buf = (uint8_t*)calloc(1, ws_pkt.len + 1);
         if (buf == NULL) {
             ESP_LOGE(TAG, "Failed to calloc memory for buf");
+            instance_->RemoveClient(req);
             return ESP_ERR_NO_MEM;
         }
         ws_pkt.payload = buf;
@@ -146,12 +156,13 @@ esp_err_t WebSocketControlServer::ws_handler(httpd_req_t *req) {
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "httpd_ws_recv_frame failed with %d", ret);
             free(buf);
+            instance_->RemoveClient(req);
             return ret;
         }
-        ESP_LOGI(TAG, "Got WebSocket text packet, len=%d", ws_pkt.len);
+        ESP_LOGD(TAG, "Got WebSocket text packet, len=%d", ws_pkt.len);
     }
     
-    ESP_LOGI(TAG, "Packet type: %d", ws_pkt.type);
+    ESP_LOGD(TAG, "Packet type: %d", ws_pkt.type);
     
     if (ws_pkt.type == HTTPD_WS_TYPE_CLOSE) {
         ESP_LOGI(TAG, "WebSocket close frame received");
@@ -199,6 +210,9 @@ bool WebSocketControlServer::Start(int port) {
 
 void WebSocketControlServer::Stop() {
     if (server_handle_) {
+        for (const auto& client : clients_) {
+            gosha::motion_live::MotionLiveAdapter::GetInstance().OnSocketClosed(client.first);
+        }
         httpd_stop(server_handle_);
         server_handle_ = nullptr;
         clients_.clear();
@@ -212,7 +226,7 @@ void WebSocketControlServer::HandleMessage(httpd_req_t *req, const char* data, s
         return;
     }
     
-    if (len > 4096) {
+    if (len > kMaxWebSocketMessageBytes) {
         ESP_LOGE(TAG, "Message too long: %zu bytes", len);
         return;
     }
@@ -230,6 +244,11 @@ void WebSocketControlServer::HandleMessage(httpd_req_t *req, const char* data, s
     
     if (root == nullptr) {
         ESP_LOGE(TAG, "Failed to parse JSON");
+        return;
+    }
+
+    if (gosha::motion_live::MotionLiveAdapter::GetInstance().HandleWebSocketMessage(req, root)) {
+        cJSON_Delete(root);
         return;
     }
 
@@ -278,6 +297,7 @@ void WebSocketControlServer::AddClient(httpd_req_t *req) {
 
 void WebSocketControlServer::RemoveClient(httpd_req_t *req) {
     int sock_fd = httpd_req_to_sockfd(req);
+    gosha::motion_live::MotionLiveAdapter::GetInstance().OnSocketClosed(sock_fd);
     clients_.erase(sock_fd);
     ESP_LOGI(TAG, "Client disconnected: %d (total: %zu)", sock_fd, clients_.size());
 }

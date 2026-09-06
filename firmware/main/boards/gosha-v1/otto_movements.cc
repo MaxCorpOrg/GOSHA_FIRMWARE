@@ -169,6 +169,26 @@ void Otto::HoldLegsFeetAtNeutral() {
     is_otto_resting_ = true;
 }
 
+bool Otto::ApplyLegsFeetPositions(int left_leg, int right_leg, int left_foot, int right_foot) {
+    const int target[kLegAndFootServoCount] = {left_leg, right_leg, left_foot, right_foot};
+
+    for (int i = 0; i < kLegAndFootServoCount; i++) {
+        if (servo_pins_[i] == -1 || target[i] < 0 || target[i] > 180) {
+            return false;
+        }
+    }
+
+    if (GetRestState() == true) {
+        SetRestState(false);
+    }
+
+    for (int i = 0; i < kLegAndFootServoCount; i++) {
+        servo_[i].SetPosition(target[i]);
+    }
+
+    return true;
+}
+
 void Otto::MoveSingle(int position, int servo_number) {
     if (position > 180)
         position = 90;

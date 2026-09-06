@@ -5,6 +5,7 @@
 #include <cJSON.h>
 #include <esp_log.h>
 
+#include <array>
 #include <cstdlib>
 #include <cstring>
 
@@ -12,6 +13,7 @@
 #include "board.h"
 #include "config.h"
 #include "mcp_server.h"
+#include "motion_live_adapter.h"
 #include "otto_movements.h"
 #include "power_manager.h"
 #include "sdkconfig.h"
@@ -49,6 +51,13 @@ private:
     bool has_complete_legs_feet_ = false;
     bool is_action_in_progress_ = false;
     bool safe_neutral_boot_done_ = false;
+    bool safe_neutral_hold_commanded_ = false;
+    int trim_left_leg_ = 0;
+    int trim_right_leg_ = 0;
+    int trim_left_foot_ = 0;
+    int trim_right_foot_ = 0;
+    int trim_left_hand_ = 0;
+    int trim_right_hand_ = 0;
 
     struct OttoActionParams {
         int action_type;
@@ -511,17 +520,19 @@ private:
     void LoadTrimsFromNVS() {
         Settings settings("otto_trims", false);
 
-        int left_leg = settings.GetInt("left_leg", 0);
-        int right_leg = settings.GetInt("right_leg", 0);
-        int left_foot = settings.GetInt("left_foot", 0);
-        int right_foot = settings.GetInt("right_foot", 0);
-        int left_hand = settings.GetInt("left_hand", 0);
-        int right_hand = settings.GetInt("right_hand", 0);
+        trim_left_leg_ = settings.GetInt("left_leg", 0);
+        trim_right_leg_ = settings.GetInt("right_leg", 0);
+        trim_left_foot_ = settings.GetInt("left_foot", 0);
+        trim_right_foot_ = settings.GetInt("right_foot", 0);
+        trim_left_hand_ = settings.GetInt("left_hand", 0);
+        trim_right_hand_ = settings.GetInt("right_hand", 0);
 
         ESP_LOGI(TAG, "Загружены подстройки из NVS: левая нога=%d, правая нога=%d, левая ступня=%d, правая ступня=%d, левая рука=%d, правая рука=%d",
-                 left_leg, right_leg, left_foot, right_foot, left_hand, right_hand);
+                 trim_left_leg_, trim_right_leg_, trim_left_foot_, trim_right_foot_,
+                 trim_left_hand_, trim_right_hand_);
 
-        otto_.SetTrims(left_leg, right_leg, left_foot, right_foot, left_hand, right_hand);
+        otto_.SetTrims(trim_left_leg_, trim_right_leg_, trim_left_foot_, trim_right_foot_,
+                       trim_left_hand_, trim_right_hand_);
     }
 
     void PerformSafeNeutralBootOnce() {
@@ -544,8 +555,43 @@ private:
         otto_.HoldLegsFeetAtNeutral();
         PowerManager::ResumeBatteryUpdate();
         is_action_in_progress_ = false;
+        safe_neutral_hold_commanded_ = true;
 
         ESP_LOGW(TAG, "Maintenance safe-neutral boot завершён: ноги и ступни удерживаются, внешние motion/Home/trim/sequence маршруты закрыты");
+    }
+
+    void ConfigureMotionLiveAdapter(const HardwareConfig& hw_config,
+                                    gpio_num_t left_hand_pin,
+                                    gpio_num_t right_hand_pin,
+                                    bool attach_servos) {
+        gosha::motion_live::MotionLiveRuntimeConfig runtime;
+        runtime.board_is_gosha_v1 = true;
+        runtime.no_motion_safe_profile = kNoMotionSafeProfile;
+        runtime.safe_neutral_boot_profile = kSafeNeutralBootProfile;
+        runtime.safe_neutral_commanded = safe_neutral_hold_commanded_;
+        runtime.lower_body_attached = attach_servos && has_complete_legs_feet_;
+
+        runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kLeftLeg)] =
+            {static_cast<int>(hw_config.left_leg_pin), trim_left_leg_, 90,
+             attach_servos && hw_config.left_leg_pin != GPIO_NUM_NC};
+        runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kRightLeg)] =
+            {static_cast<int>(hw_config.right_leg_pin), trim_right_leg_, 90,
+             attach_servos && hw_config.right_leg_pin != GPIO_NUM_NC};
+        runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kLeftFoot)] =
+            {static_cast<int>(hw_config.left_foot_pin), trim_left_foot_, 90,
+             attach_servos && hw_config.left_foot_pin != GPIO_NUM_NC};
+        runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kRightFoot)] =
+            {static_cast<int>(hw_config.right_foot_pin), trim_right_foot_, 90,
+             attach_servos && hw_config.right_foot_pin != GPIO_NUM_NC};
+        runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kLeftHand)] =
+            {static_cast<int>(left_hand_pin), trim_left_hand_, 90, false};
+        runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kRightHand)] =
+            {static_cast<int>(right_hand_pin), trim_right_hand_, 90, false};
+
+        auto applier = [this](const std::array<int, gosha::motion_live::kActiveJointCount>& target) {
+            return otto_.ApplyLegsFeetPositions(target[0], target[1], target[2], target[3]);
+        };
+        gosha::motion_live::MotionLiveAdapter::GetInstance().ConfigureRuntime(runtime, applier);
     }
 
 public:
@@ -589,6 +635,7 @@ public:
         LoadTrimsFromNVS();
 
         PerformSafeNeutralBootOnce();
+        ConfigureMotionLiveAdapter(hw_config, left_hand_pin, right_hand_pin, attach_servos);
 
         action_queue_ = xQueueCreate(10, sizeof(OttoActionParams));
 

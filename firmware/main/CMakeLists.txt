@@ -889,6 +889,7 @@ idf_component_register(SRCS ${SOURCES}
                         console
                         efuse
                         bt
+                        mbedtls
                     )
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
@@ -904,6 +905,24 @@ if(CONFIG_BOARD_TYPE_GOSHA_V1)
     target_compile_definitions(${COMPONENT_LIB}
                         PRIVATE GOSHA_UI_ACCENT_COLOR=0x${GOSHA_UI_ACCENT_COLOR_HEX}
                         )
+    if(CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN)
+        if(NOT DEFINED GOSHA_MOTION_LIVE_PROFILE_HEADER OR
+           "${GOSHA_MOTION_LIVE_PROFILE_HEADER}" STREQUAL "")
+            message(FATAL_ERROR
+                "CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN requires "
+                "-DGOSHA_MOTION_LIVE_PROFILE_HEADER=/absolute/ignored/local_only/header.h")
+        endif()
+        if(NOT IS_ABSOLUTE "${GOSHA_MOTION_LIVE_PROFILE_HEADER}")
+            message(FATAL_ERROR "GOSHA_MOTION_LIVE_PROFILE_HEADER must be an absolute path")
+        endif()
+        if(NOT EXISTS "${GOSHA_MOTION_LIVE_PROFILE_HEADER}")
+            message(FATAL_ERROR "GOSHA_MOTION_LIVE_PROFILE_HEADER does not exist")
+        endif()
+        target_compile_definitions(${COMPONENT_LIB}
+                            PRIVATE GOSHA_MOTION_LIVE_PROFILE_HEADER_ENABLED=1
+                            PRIVATE "GOSHA_MOTION_LIVE_PROFILE_HEADER=\"${GOSHA_MOTION_LIVE_PROFILE_HEADER}\""
+                            )
+    endif()
 endif()
 
 # Add generation rules
@@ -922,6 +941,7 @@ add_custom_command(
 add_custom_target(lang_header ALL
     DEPENDS ${LANG_HEADER}
 )
+add_dependencies(${COMPONENT_LIB} lang_header)
 
 # Find ESP-SR component dynamically
 find_component_by_pattern("espressif__esp-sr" ESP_SR_COMPONENT ESP_SR_COMPONENT_PATH)

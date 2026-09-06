@@ -524,6 +524,20 @@ config GOSHA_SAFE_NEUTRAL_BOOT_PROFILE
         command, and leaves all MCP/raw/server motion, trim, sequence, OTA,
         assets write and reboot paths closed.
 
+config GOSHA_MOTION_LIVE_LOCAL_OPT_IN
+    bool "GOSHA v1 local owner Live motion adapter"
+    depends on BOARD_TYPE_GOSHA_V1
+    depends on GOSHA_NO_MOTION_SAFE_PROFILE
+    depends on GOSHA_SAFE_NEUTRAL_BOOT_PROFILE
+    default n
+    help
+        Enables the separate local WebSocket Live namespace only for an
+        owner-prepared calibration profile supplied from an ignored local_only
+        generated header through an explicit CMake path. It does not enable
+        legacy MCP motion tools, Home, trim, servo sequences, OTA, reboot or
+        assets writes. Leave this disabled unless the owner has completed the
+        mechanical admission for the four lower-body channels.
+
 choice
     depends on BOARD_TYPE_LILYGO_T_DISPLAY_P4
     prompt "Select the screen type"
