@@ -16,10 +16,14 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "local_only/gosha_motion_live_profile.h"
 PROFILE_ID = "gosha-preview-v1"
+PROFILE_MODE_VERIFIED = "verified"
+PROFILE_MODE_COMMISSIONING = "commissioning"
 WATCHDOG_MS = 300
 MIN_RATE_HZ = 5
 MAX_RATE_HZ = 20
 MAX_SPEED_DPS = 30
+COMMISSIONING_LIMIT_DEGREES = 1.0
+COMMISSIONING_MAX_SPEED_DPS = 1.0
 CALIBRATION_RE = re.compile(r"^[a-f0-9]{64}$")
 
 UI_JOINTS = {
@@ -84,7 +88,7 @@ def validate_access_key(value: Any) -> str:
     return value
 
 
-def validate_joint(raw: Any) -> dict[str, Any]:
+def validate_joint(raw: Any, mode: str) -> dict[str, Any]:
     require(isinstance(raw, dict), "each joint entry must be an object")
     joint_id = raw.get("id")
     require(isinstance(joint_id, str) and joint_id in UI_JOINTS, "joint id must be one of the four lower-body ids")
@@ -126,6 +130,12 @@ def validate_joint(raw: Any) -> dict[str, Any]:
 
     max_speed = as_number(raw.get("max_speed_dps"), f"{joint_id}.max_speed_dps")
     require(0 < max_speed <= MAX_SPEED_DPS, f"{joint_id}: max_speed_dps must be <= {MAX_SPEED_DPS}")
+    if mode == PROFILE_MODE_COMMISSIONING:
+        require(relative_min == -COMMISSIONING_LIMIT_DEGREES and
+                relative_max == COMMISSIONING_LIMIT_DEGREES,
+                f"{joint_id}: commissioning limits must be exactly [-1,+1] degrees")
+        require(max_speed <= COMMISSIONING_MAX_SPEED_DPS,
+                f"{joint_id}: commissioning max_speed_dps must be <= {COMMISSIONING_MAX_SPEED_DPS}")
 
     return {
         "id": joint_id,
@@ -146,6 +156,9 @@ def validate_joint(raw: Any) -> dict[str, Any]:
 def validate_profile(raw: Any) -> dict[str, Any]:
     require(isinstance(raw, dict), "profile JSON must be an object")
     require(raw.get("profile_id") == PROFILE_ID, f"profile_id must be {PROFILE_ID}")
+    mode = raw.get("mode", PROFILE_MODE_VERIFIED)
+    require(mode in (PROFILE_MODE_VERIFIED, PROFILE_MODE_COMMISSIONING),
+            "mode must be verified or commissioning")
     access_key = validate_access_key(raw.get("access_key"))
     watchdog_ms = as_int(raw.get("watchdog_ms", WATCHDOG_MS), "watchdog_ms")
     require(watchdog_ms == WATCHDOG_MS, "watchdog_ms must be exactly 300")
@@ -156,7 +169,7 @@ def validate_profile(raw: Any) -> dict[str, Any]:
     joints_raw = raw.get("joints")
     require(isinstance(joints_raw, list) and len(joints_raw) == len(UI_JOINTS),
             "joints must contain exactly the four lower-body entries")
-    joints = [validate_joint(item) for item in joints_raw]
+    joints = [validate_joint(item, mode) for item in joints_raw]
     require({item["id"] for item in joints} == set(UI_JOINTS), "joints must cover each lower-body id once")
     require({item["servo_key"] for item in joints} == set(SERVO_SLOTS),
             "joints must bind each lower-body servo_key once")
@@ -164,6 +177,7 @@ def validate_profile(raw: Any) -> dict[str, Any]:
 
     calibration_payload = {
         "profile_id": PROFILE_ID,
+        "mode": mode,
         "watchdog_ms": watchdog_ms,
         "max_rate_hz": max_rate_hz,
         "joints": sorted(joints, key=lambda item: item["id"]),
@@ -188,6 +202,7 @@ def validate_profile(raw: Any) -> dict[str, Any]:
 
     return {
         "profile_id": PROFILE_ID,
+        "mode": mode,
         "calibration_id": calibration_id,
         "access_key_sha256": hashlib.sha256(access_key.encode("utf-8")).hexdigest(),
         "watchdog_ms": watchdog_ms,
@@ -241,6 +256,7 @@ def render_header(profile: dict[str, Any]) -> str:
         )
     lines.extend([
         "    }},",
+        f"    {cpp_string(profile['mode'])},",
         "};",
         "",
         "}  // namespace gosha::motion_live",
@@ -257,6 +273,7 @@ def load_json(path: Path) -> Any:
 def run_self_test() -> None:
     sample = {
         "profile_id": PROFILE_ID,
+        "mode": PROFILE_MODE_VERIFIED,
         "access_key": "LiveKey-20260906-Q4bz!",
         "watchdog_ms": 300,
         "max_rate_hz": 20,
@@ -276,6 +293,7 @@ def run_self_test() -> None:
         ],
     }
     profile = validate_profile(sample)
+    require(profile["mode"] == PROFILE_MODE_VERIFIED, "verified profile mode changed")
     require(CALIBRATION_RE.fullmatch(profile["calibration_id"]) is not None,
             "computed calibration_id is not 64 lowercase hex")
     header = render_header(profile)
@@ -285,6 +303,45 @@ def run_self_test() -> None:
         output = Path(tmp) / "gosha_motion_live_profile.h"
         output.write_text(header, encoding="utf-8")
         require(output.read_text(encoding="utf-8") == header, "self-test header write failed")
+
+    commissioning = json.loads(json.dumps(sample))
+    commissioning["mode"] = PROFILE_MODE_COMMISSIONING
+    for joint in commissioning["joints"]:
+        joint["min"] = -1
+        joint["max"] = 1
+        joint["servo_min_degrees"] = 89
+        joint["servo_max_degrees"] = 91
+        joint["max_speed_dps"] = 1
+    commissioning_profile = validate_profile(commissioning)
+    require(commissioning_profile["mode"] == PROFILE_MODE_COMMISSIONING,
+            "commissioning profile mode changed")
+    require(commissioning_profile["calibration_id"] != profile["calibration_id"],
+            "commissioning mode must be included in computed calibration_id")
+    commissioning_header = render_header(commissioning_profile)
+    require('"commissioning"' in commissioning_header, "header did not mark commissioning mode")
+    require("LiveKey-20260906-Q4bz!" not in commissioning_header,
+            "commissioning header leaked plaintext access_key")
+
+    bad_commissioning_range = json.loads(json.dumps(commissioning))
+    bad_commissioning_range["joints"][0]["max"] = 2
+    bad_commissioning_range["joints"][0]["servo_max_degrees"] = 92
+    try:
+        validate_profile(bad_commissioning_range)
+    except ProfileError as exc:
+        require("commissioning limits" in str(exc),
+                f"commissioning range negative test named wrong error: {exc}")
+    else:
+        raise ProfileError("commissioning range negative test was accepted")
+
+    bad_commissioning_speed = json.loads(json.dumps(commissioning))
+    bad_commissioning_speed["joints"][0]["max_speed_dps"] = 2
+    try:
+        validate_profile(bad_commissioning_speed)
+    except ProfileError as exc:
+        require("commissioning max_speed_dps" in str(exc),
+                f"commissioning speed negative test named wrong error: {exc}")
+    else:
+        raise ProfileError("commissioning speed negative test was accepted")
 
     bad = dict(sample)
     bad["joints"] = list(sample["joints"])

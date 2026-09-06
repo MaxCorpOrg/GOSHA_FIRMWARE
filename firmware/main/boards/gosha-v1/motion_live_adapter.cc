@@ -294,6 +294,8 @@ esp_err_t MotionLiveAdapter::SendCapabilities(httpd_req_t* req, cJSON* request,
     CopyRequestField(reply, request, "request_id", "request_id");
     cJSON_AddBoolToObject(reply, "motion_allowed", caps.motion_allowed);
     cJSON_AddStringToObject(reply, "reason", caps.reason);
+    cJSON_AddStringToObject(reply, "mode", caps.mode);
+    cJSON_AddBoolToObject(reply, "commissioning", caps.commissioning);
     cJSON_AddStringToObject(reply, "profile_id", caps.profile_id);
     cJSON_AddBoolToObject(reply, "calibrated", caps.calibrated);
     cJSON_AddStringToObject(reply, "calibration_id", caps.calibration_id);

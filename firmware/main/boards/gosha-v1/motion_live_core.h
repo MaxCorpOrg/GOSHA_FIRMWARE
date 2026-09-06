@@ -17,6 +17,10 @@ constexpr int kMinMaxRateHz = 5;
 constexpr int kMaxMaxRateHz = 20;
 constexpr int kMaxServoRateDps = 30;
 constexpr int kNeutralDegrees = 90;
+constexpr const char* kProfileModeVerified = "verified";
+constexpr const char* kProfileModeCommissioning = "commissioning";
+constexpr double kCommissioningJointLimitDegrees = 1.0;
+constexpr double kCommissioningMaxServoRateDps = 1.0;
 
 enum class JointIndex : int {
     kArmNegativeX = 0,
@@ -85,6 +89,7 @@ struct MotionLivePreparedProfile {
     int watchdog_ms = kWatchdogMs;
     int max_rate_hz = 0;
     std::array<MotionLiveJointProfile, kActiveJointCount> joints{};
+    const char* mode = kProfileModeVerified;
 };
 
 struct MotionLiveRuntimeJoint {
@@ -108,6 +113,8 @@ struct MotionLiveCapabilities {
     bool motion_allowed = false;
     const char* reason = "live_profile_unprepared";
     bool calibrated = false;
+    bool commissioning = false;
+    const char* mode = "closed";
     const char* profile_id = kModelProfileId;
     const char* calibration_id = "";
     int watchdog_ms = kWatchdogMs;
@@ -176,6 +183,10 @@ private:
     bool BuildServoDegreesForPose(const MotionLivePose& pose,
                                   std::array<int, kActiveJointCount>* servo_degrees,
                                   const char** reason) const;
+    bool ProfileIsCommissioning() const;
+    bool ValidateCommissioningTarget(
+        const std::array<int, kActiveJointCount>& servo_degrees,
+        const char** reason);
     MotionLivePose PoseFromServoDegrees(const std::array<int, kActiveJointCount>& servo_degrees) const;
     bool LeaseExpired(uint64_t now_ms) const;
     bool StepTowardTarget(uint64_t now_ms, const char** reason, bool* hardware_changed);
@@ -197,6 +208,8 @@ private:
     MotionLivePose fractional_pose_{};
     MotionLivePose target_pose_{};
     std::array<int, kActiveJointCount> commanded_servo_degrees_{};
+    std::array<int, kActiveJointCount> session_initial_servo_degrees_{};
+    int commissioning_servo_index_ = -1;
 };
 
 }  // namespace gosha::motion_live

@@ -130,6 +130,10 @@ def validate_adapter(adapter: str) -> None:
     require('cJSON_AddBoolToObject(feedback, "measured_position", false)' in adapter,
             "measured_position feedback must default false")
     require('cJSON_AddBoolToObject(feedback, "imu", false)' in adapter, "IMU feedback must default false")
+    require('cJSON_AddStringToObject(reply, "mode", caps.mode)' in adapter,
+            "capabilities must report Live profile mode")
+    require('cJSON_AddBoolToObject(reply, "commissioning", caps.commissioning)' in adapter,
+            "capabilities must report commissioning mode explicitly")
     require('cJSON_AddNullToObject(reply, "measured_pose")' in adapter, "ACK must not synthesize measured_pose")
     require('cJSON_AddNullToObject(reply, "tilt")' in adapter, "ACK must not synthesize tilt")
     require("esp_timer_start_periodic" in adapter and "gosha_live_watchdog" in adapter,
@@ -143,6 +147,10 @@ def validate_core(core: str, core_h: str) -> None:
         '"gosha-preview-v1"',
         "kWatchdogMs = 300",
         "kMaxServoRateDps = 30",
+        "kProfileModeVerified",
+        "kProfileModeCommissioning",
+        "kCommissioningJointLimitDegrees = 1.0",
+        "kCommissioningMaxServoRateDps = 1.0",
         '"leg_negative_x"',
         '"leg_positive_x"',
         '"foot_negative_x"',
@@ -152,6 +160,10 @@ def validate_core(core: str, core_h: str) -> None:
     ):
         require(token in core + core_h, f"core contract token is missing: {token}")
     require("motion_allowed = false" in core_h, "capabilities must default motion_allowed=false")
+    require("const char* mode = kProfileModeVerified" in core_h,
+            "prepared profile mode must default to verified for old generated initializers")
+    require("bool commissioning = false" in core_h,
+            "capabilities must default commissioning=false")
     require("ValidatePreparedProfile" in core and "ValidateRuntimeAgainstProfile" in core,
             "core must validate generated profile and runtime binding")
     require("local_opt_in_enabled_" in core_h and "profile_ = nullptr" in core_h,
@@ -161,6 +173,23 @@ def validate_core(core: str, core_h: str) -> None:
             "core must reject unknown or hand joints in pose target")
     require("speed_dps > kMaxServoRateDps" in core and "speed_dps > joint.max_speed_dps" in core,
             "core must enforce <=30 dps and per-joint speed")
+    require("joint.min_relative_degrees != -kCommissioningJointLimitDegrees" in core and
+            "joint.max_relative_degrees != kCommissioningJointLimitDegrees" in core and
+            "joint.max_speed_dps > kCommissioningMaxServoRateDps" in core,
+            "commissioning mode must force exact ±1 degree limits and <=1 dps")
+    require("ValidateCommissioningTarget" in core and "session_initial_servo_degrees_" in core_h and
+            "commissioning_servo_index_" in core_h and "kCommissioningSingleJoint" in core,
+            "commissioning mode must track one physical joint per session")
+    require("!ValidateCommissioningTarget(servo_degrees, &reason)" in core,
+            "pose must call the commissioning one physical joint gate")
+    require("std::abs(delta) > 1" in core and "changed_count > 1" in core,
+            "commissioning mode must reject multi-joint and >1 degree baseline deltas")
+    require("commissioning_servo_index_ = changed_slot" in core,
+            "commissioning mode must lock the first changed physical joint")
+    require("caps.commissioning = ProfileIsCommissioning()" in core and
+            "caps.calibrated = !caps.commissioning" in core and
+            "caps.mode = profile_->mode" in core,
+            "capabilities must distinguish commissioning from verified calibration")
     require("now_ms - last_command_ms_" in core and "kWatchdogMs" in core,
             "core must enforce watchdog timeout")
     require("watchdog_tick_ready" in core_h and "kWatchdogUnavailable" in core,
@@ -207,12 +236,18 @@ def validate_controller(controller: str, movements: str) -> None:
 def validate_prepare(prepare: str) -> None:
     for token in (
         "DEFAULT_OUTPUT = ROOT / \"local_only/gosha_motion_live_profile.h\"",
+        "PROFILE_MODE_VERIFIED = \"verified\"",
+        "PROFILE_MODE_COMMISSIONING = \"commissioning\"",
         '"access_key"',
         "hashlib.sha256",
         "calibration_payload",
+        "\"mode\": mode",
         "sort_keys=True",
         "calibration_id is computed",
         "plaintext access_key was not written",
+        "mode must be verified or commissioning",
+        "commissioning limits must be exactly [-1,+1] degrees",
+        "commissioning max_speed_dps must be <=",
         "servo_key must be explicit",
         "servo_key must stay within",
         '"leg_negative_x"',
@@ -296,6 +331,20 @@ def run_self_test() -> None:
         "seq != last_seq_ + 1",
         "false",
         "strict sequence",
+    )
+    expect_rejection(
+        values,
+        "core",
+        "ValidateCommissioningTarget(servo_degrees, &reason)",
+        "true",
+        "one physical joint",
+    )
+    expect_rejection(
+        values,
+        "adapter",
+        'cJSON_AddBoolToObject(reply, "commissioning", caps.commissioning);',
+        "",
+        "commissioning mode explicitly",
     )
 
 

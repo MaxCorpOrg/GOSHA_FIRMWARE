@@ -24,6 +24,7 @@ constexpr const char* kRateLimit = "rate_limit";
 constexpr const char* kWatchdogTimeout = "watchdog_timeout";
 constexpr const char* kWatchdogUnavailable = "watchdog_unavailable";
 constexpr const char* kHardwareApplyFailed = "hardware_apply_failed";
+constexpr const char* kCommissioningSingleJoint = "commissioning_single_joint";
 
 bool Streq(const char* left, const char* right) {
     return left != nullptr && right != nullptr && std::strcmp(left, right) == 0;
@@ -124,6 +125,7 @@ MotionLiveCore::MotionLiveCore() {
     fractional_pose_.relative_degrees.fill(0.0);
     target_pose_.relative_degrees.fill(0.0);
     commanded_servo_degrees_.fill(kNeutralDegrees);
+    session_initial_servo_degrees_.fill(kNeutralDegrees);
     for (auto& runtime_joint : runtime_.joints) {
         runtime_joint.commanded_degrees = kNeutralDegrees;
     }
@@ -151,6 +153,8 @@ bool MotionLiveCore::ValidatePreparedProfile(const char** reason) const {
         return false;
     }
     if (!Streq(profile_->profile_id, kModelProfileId) ||
+        !(Streq(profile_->mode, kProfileModeVerified) ||
+          Streq(profile_->mode, kProfileModeCommissioning)) ||
         !IsHex64(profile_->calibration_id) ||
         !IsHex64(profile_->access_key_sha256) ||
         profile_->watchdog_ms != kWatchdogMs ||
@@ -194,6 +198,14 @@ bool MotionLiveCore::ValidatePreparedProfile(const char** reason) const {
             joint.min_servo_degrees >= joint.max_servo_degrees ||
             joint.max_speed_dps <= 0.0 ||
             joint.max_speed_dps > kMaxServoRateDps) {
+            *reason = kProfileMismatch;
+            return false;
+        }
+
+        if (ProfileIsCommissioning() &&
+            (joint.min_relative_degrees != -kCommissioningJointLimitDegrees ||
+             joint.max_relative_degrees != kCommissioningJointLimitDegrees ||
+             joint.max_speed_dps > kCommissioningMaxServoRateDps)) {
             *reason = kProfileMismatch;
             return false;
         }
@@ -292,7 +304,9 @@ MotionLiveCapabilities MotionLiveCore::GetCapabilities() const {
 
     caps.motion_allowed = true;
     caps.reason = kOk;
-    caps.calibrated = true;
+    caps.commissioning = ProfileIsCommissioning();
+    caps.calibrated = !caps.commissioning;
+    caps.mode = profile_->mode;
     caps.profile_id = profile_->profile_id;
     caps.calibration_id = profile_->calibration_id;
     caps.watchdog_ms = profile_->watchdog_ms;
@@ -342,6 +356,7 @@ MotionLiveResult MotionLiveCore::DisarmWithError(const char* code, const char* m
     session_id_.clear();
     last_seq_ = 0;
     last_command_ms_ = 0;
+    commissioning_servo_index_ = -1;
     return result;
 }
 
@@ -466,6 +481,47 @@ bool MotionLiveCore::BuildServoDegreesForPose(
             return false;
         }
         (*servo_degrees)[joint.servo_index] = RoundServoDegree(servo);
+    }
+    return true;
+}
+
+bool MotionLiveCore::ProfileIsCommissioning() const {
+    return profile_ != nullptr && Streq(profile_->mode, kProfileModeCommissioning);
+}
+
+bool MotionLiveCore::ValidateCommissioningTarget(
+    const std::array<int, kActiveJointCount>& servo_degrees,
+    const char** reason) {
+    if (!ProfileIsCommissioning()) {
+        return true;
+    }
+
+    int changed_slot = -1;
+    int changed_count = 0;
+    for (int slot = 0; slot < kActiveJointCount; ++slot) {
+        const int delta = servo_degrees[slot] - session_initial_servo_degrees_[slot];
+        if (delta == 0) {
+            continue;
+        }
+        if (std::abs(delta) > 1) {
+            *reason = kCommissioningSingleJoint;
+            return false;
+        }
+        changed_slot = slot;
+        ++changed_count;
+    }
+
+    if (changed_count > 1) {
+        *reason = kCommissioningSingleJoint;
+        return false;
+    }
+    if (changed_count == 1) {
+        if (commissioning_servo_index_ >= 0 &&
+            changed_slot != commissioning_servo_index_) {
+            *reason = kCommissioningSingleJoint;
+            return false;
+        }
+        commissioning_servo_index_ = changed_slot;
     }
     return true;
 }
@@ -610,6 +666,8 @@ MotionLiveResult MotionLiveCore::Arm(int owner_socket,
     current_speed_dps_ = 0.0;
     fractional_pose_ = commanded_pose_;
     target_pose_ = commanded_pose_;
+    session_initial_servo_degrees_ = commanded_servo_degrees_;
+    commissioning_servo_index_ = -1;
 
     MotionLiveResult result = MakeAck(0, false);
     result.session_id = session_id_;
@@ -644,6 +702,9 @@ MotionLiveResult MotionLiveCore::Pose(int owner_socket,
     std::array<int, kActiveJointCount> servo_degrees{};
     if (!BuildServoDegrees(target, &servo_degrees, &reason)) {
         return DisarmWithError(reason, "Target pose is outside the prepared profile", true);
+    }
+    if (!ValidateCommissioningTarget(servo_degrees, &reason)) {
+        return DisarmWithError(reason, "Commissioning session can move only one physical joint", true);
     }
 
     MotionLivePose next_target = target_pose_;
@@ -713,6 +774,7 @@ MotionLiveResult MotionLiveCore::Stop(int owner_socket,
     current_speed_dps_ = 0.0;
     fractional_pose_ = commanded_pose_;
     target_pose_ = commanded_pose_;
+    commissioning_servo_index_ = -1;
     return result;
 }
 
@@ -746,6 +808,7 @@ void MotionLiveCore::OnSocketClosed(int owner_socket) {
         current_speed_dps_ = 0.0;
         fractional_pose_ = commanded_pose_;
         target_pose_ = commanded_pose_;
+        commissioning_servo_index_ = -1;
     }
 }
 

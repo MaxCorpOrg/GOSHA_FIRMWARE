@@ -83,6 +83,21 @@ GOSHA_OTA_URL='https://maintenance.invalid/firmware/' \
 Адрес `.invalid` служит только безопасной заглушкой для локальной сборки;
 полученный образ не предназначен для удалённого обновления.
 
+## Commissioning Live
+
+`mode=commissioning` предназначен для первого live-шага одного привода, когда
+у владельца ещё нет verified механической привязки и диапазонов. Такой профиль
+не открывает полноценную анимацию: capabilities возвращают
+`commissioning=true`, `calibrated=false`, limits каждого lower-body joint
+строго `[-1,+1]`, `max_speed_dps <= 1`, measured pose и tilt остаются `null`.
+
+Внутри одной сессии фиксируется начальная applied-поза и первый физический
+канал, который отличается от неё. До STOP или watchdog другой физический канал
+двигать нельзя даже после возврата первого в baseline; переход дальше чем на
+один градус от baseline также отклоняется. Профиль всё равно требует локальный
+access key, generated header вне Git, совпадение pin/trim/neutral с runtime и
+те же no-motion/safe-neutral guards.
+
 ## Live-настройка в редакторе движений
 
 Ветка `codex/motion-live-20260906` содержит обработчик `gosha.motion.live.v1`

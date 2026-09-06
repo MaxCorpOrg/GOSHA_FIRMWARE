@@ -46,6 +46,23 @@ MotionLivePreparedProfile ValidProfile(bool swapped_sides = false) {
     };
 }
 
+MotionLivePreparedProfile CommissioningProfile() {
+    return {
+        "gosha-preview-v1",
+        "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+        "bbcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        300,
+        20,
+        {{
+            {"leg_negative_x", "left_leg", 0, 17, 0, 90, 1, -1.0, 1.0, 89, 91, 1.0},
+            {"leg_positive_x", "right_leg", 1, 39, 0, 90, -1, -1.0, 1.0, 89, 91, 1.0},
+            {"foot_negative_x", "left_foot", 2, 18, 0, 90, 1, -1.0, 1.0, 89, 91, 1.0},
+            {"foot_positive_x", "right_foot", 3, 38, 0, 90, -1, -1.0, 1.0, 89, 91, 1.0},
+        }},
+        "commissioning",
+    };
+}
+
 MotionLiveRuntimeConfig ValidRuntime() {
     MotionLiveRuntimeConfig runtime;
     runtime.board_is_gosha_v1 = true;
@@ -273,6 +290,136 @@ int main() {
     CHECK(!core.GetCapabilities().motion_allowed);
     CHECK(std::string(core.GetCapabilities().reason) == "watchdog_unavailable");
     core.SetRuntimeConfig(ValidRuntime());
+
+    {
+        MotionLivePreparedProfile commissioning_profile = CommissioningProfile();
+        MotionLiveCore commissioning_core;
+        int commissioning_apply_count = 0;
+        std::array<int, kActiveJointCount> commissioning_last_apply{};
+        commissioning_core.SetLocalOptInEnabled(true);
+        commissioning_core.SetPreparedProfile(&commissioning_profile);
+        commissioning_core.SetRuntimeConfig(ValidRuntime());
+        commissioning_core.SetHardwareApplier([&](const std::array<int, kActiveJointCount>& target) {
+            ++commissioning_apply_count;
+            commissioning_last_apply = target;
+            return true;
+        });
+
+        auto commissioning_caps = commissioning_core.GetCapabilities();
+        CHECK(commissioning_caps.motion_allowed);
+        CHECK(!commissioning_caps.calibrated);
+        CHECK(commissioning_caps.commissioning);
+        CHECK(std::string(commissioning_caps.mode) == "commissioning");
+        for (const auto& limit : commissioning_caps.joint_limits) {
+            CHECK(limit.min_relative_degrees == -1.0);
+            CHECK(limit.max_relative_degrees == 1.0);
+            CHECK(limit.max_speed_dps == 1.0);
+        }
+
+        auto commissioning_armed = commissioning_core.Arm(
+            30, commissioning_profile.calibration_id, true, "session_commissioning_1", 12000);
+        CHECK(commissioning_armed.ok);
+        auto commissioning_fast = commissioning_core.Pose(
+            30, commissioning_armed.session_id, 1, Target(1, 0, 0, 0), 2, 12010);
+        CHECK(!commissioning_fast.ok);
+        CHECK(std::string(commissioning_fast.code) == "rate_limit");
+        CHECK(!commissioning_core.IsArmed());
+        CHECK(commissioning_apply_count == 0);
+
+        commissioning_armed = commissioning_core.Arm(
+            30, commissioning_profile.calibration_id, true, "session_commissioning_2", 13000);
+        CHECK(commissioning_armed.ok);
+        auto commissioning_two_joints = commissioning_core.Pose(
+            30, commissioning_armed.session_id, 1, Target(1, 1, 0, 0), 1, 13010);
+        CHECK(!commissioning_two_joints.ok);
+        CHECK(std::string(commissioning_two_joints.code) == "commissioning_single_joint");
+        CHECK(!commissioning_core.IsArmed());
+        CHECK(commissioning_apply_count == 0);
+
+        commissioning_armed = commissioning_core.Arm(
+            30, commissioning_profile.calibration_id, true, "session_commissioning_3", 15000);
+        CHECK(commissioning_armed.ok);
+        auto commissioning_one_joint = commissioning_core.Pose(
+            30, commissioning_armed.session_id, 1, Target(1, 0, 0, 0), 1, 15010);
+        CHECK(commissioning_one_joint.ok);
+        CHECK(!commissioning_one_joint.should_apply);
+        commissioning_one_joint = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 2, 15250);
+        CHECK(commissioning_one_joint.ok);
+        commissioning_one_joint = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 3, 15500);
+        CHECK(commissioning_one_joint.ok);
+        commissioning_one_joint = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 4, 15750);
+        CHECK(commissioning_one_joint.ok);
+        commissioning_one_joint = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 5, 16000);
+        CHECK(commissioning_one_joint.ok);
+        CHECK(commissioning_one_joint.should_apply);
+        CHECK(commissioning_apply_count == 1);
+        CHECK(commissioning_last_apply[static_cast<int>(ServoSlot::kLeftLeg)] == 91);
+        auto commissioning_back_to_baseline = commissioning_core.Pose(
+            30, commissioning_armed.session_id, 6, Target(0, 0, 0, 0), 1, 16010);
+        CHECK(commissioning_back_to_baseline.ok);
+        commissioning_back_to_baseline = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 7, 16260);
+        CHECK(commissioning_back_to_baseline.ok);
+        commissioning_back_to_baseline = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 8, 16510);
+        CHECK(commissioning_back_to_baseline.ok);
+        commissioning_back_to_baseline = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 9, 16760);
+        CHECK(commissioning_back_to_baseline.ok);
+        commissioning_back_to_baseline = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 10, 17010);
+        CHECK(commissioning_back_to_baseline.ok);
+        CHECK(commissioning_apply_count == 2);
+        auto commissioning_switch_joint = commissioning_core.Pose(
+            30, commissioning_armed.session_id, 11, Target(0, 0, 1, 0), 1, 17020);
+        CHECK(!commissioning_switch_joint.ok);
+        CHECK(std::string(commissioning_switch_joint.code) == "commissioning_single_joint");
+        CHECK(!commissioning_core.IsArmed());
+
+        commissioning_armed = commissioning_core.Arm(
+            30, commissioning_profile.calibration_id, true, "session_commissioning_4", 19000);
+        CHECK(commissioning_armed.ok);
+        auto commissioning_plus_one = commissioning_core.Pose(
+            30, commissioning_armed.session_id, 1, Target(1, 0, 0, 0), 1, 19010);
+        CHECK(commissioning_plus_one.ok);
+        commissioning_plus_one = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 2, 19250);
+        CHECK(commissioning_plus_one.ok);
+        commissioning_plus_one = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 3, 19500);
+        CHECK(commissioning_plus_one.ok);
+        commissioning_plus_one = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 4, 19750);
+        CHECK(commissioning_plus_one.ok);
+        commissioning_plus_one = commissioning_core.Keepalive(
+            30, commissioning_armed.session_id, 5, 20000);
+        CHECK(commissioning_plus_one.ok);
+        CHECK(commissioning_plus_one.should_apply);
+        auto commissioning_stop = commissioning_core.Stop(30, commissioning_armed.session_id, 6);
+        CHECK(commissioning_stop.stopped);
+        commissioning_armed = commissioning_core.Arm(
+            30, commissioning_profile.calibration_id, true, "session_commissioning_5", 21000);
+        CHECK(commissioning_armed.ok);
+        auto commissioning_two_degrees_from_baseline = commissioning_core.Pose(
+            30, commissioning_armed.session_id, 1, Target(-1, 0, 0, 0), 1, 21010);
+        CHECK(!commissioning_two_degrees_from_baseline.ok);
+        CHECK(std::string(commissioning_two_degrees_from_baseline.code) ==
+              "commissioning_single_joint");
+        CHECK(!commissioning_core.IsArmed());
+
+        MotionLivePreparedProfile wide_commissioning = CommissioningProfile();
+        wide_commissioning.joints[0].max_relative_degrees = 2.0;
+        MotionLiveCore wide_commissioning_core;
+        wide_commissioning_core.SetLocalOptInEnabled(true);
+        wide_commissioning_core.SetPreparedProfile(&wide_commissioning);
+        wide_commissioning_core.SetRuntimeConfig(ValidRuntime());
+        CHECK(!wide_commissioning_core.GetCapabilities().motion_allowed);
+        CHECK(std::string(wide_commissioning_core.GetCapabilities().reason) == "profile_mismatch");
+    }
 
     MotionLiveRuntimeConfig wrong_runtime = ValidRuntime();
     wrong_runtime.joints[static_cast<int>(ServoSlot::kLeftLeg)].trim = 1;
