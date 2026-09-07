@@ -15,8 +15,11 @@ KCONFIG = ROOT / "main/Kconfig.projbuild"
 CMAKE = ROOT / "main/CMakeLists.txt"
 WS = ROOT / "main/boards/gosha-v1/websocket_control_server.cc"
 ADAPTER = ROOT / "main/boards/gosha-v1/motion_live_adapter.cc"
+ADAPTER_H = ROOT / "main/boards/gosha-v1/motion_live_adapter.h"
 CORE = ROOT / "main/boards/gosha-v1/motion_live_core.cc"
 CORE_H = ROOT / "main/boards/gosha-v1/motion_live_core.h"
+USB_FRAMING = ROOT / "main/boards/gosha-v1/motion_live_usb_framing.h"
+USB_TRANSPORT = ROOT / "main/boards/gosha-v1/motion_live_usb_transport.cc"
 BOARD = ROOT / "main/boards/gosha-v1/otto_robot.cc"
 CONTROLLER = ROOT / "main/boards/gosha-v1/otto_controller.cc"
 MOVEMENTS = ROOT / "main/boards/gosha-v1/otto_movements.cc"
@@ -25,6 +28,7 @@ RELEASE = ROOT / "scripts/release.py"
 
 LIVE_OPT_IN = "CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN=y"
 RIGHT_ARM_OPT_IN = "CONFIG_GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN=y"
+USB_OPT_IN = "CONFIG_GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN=y"
 
 
 class GuardError(Exception):
@@ -79,6 +83,10 @@ def validate_config(config_text: str) -> None:
             RIGHT_ARM_OPT_IN not in flags,
             "release config must not enable CONFIG_GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN by default",
         )
+        require(
+            USB_OPT_IN not in flags,
+            "release config must not enable CONFIG_GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN by default",
+        )
 
 
 def validate_kconfig(kconfig: str) -> None:
@@ -103,6 +111,23 @@ def validate_kconfig(kconfig: str) -> None:
     require("GPIO12" in right_body and "initialize_right_arm" in right_body,
             "right-arm opt-in help must document GPIO12 and explicit initialization")
 
+    usb_body = kconfig_body(kconfig, "GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN")
+    for dependency in (
+        "depends on BOARD_TYPE_GOSHA_V1",
+        "depends on SOC_USB_SERIAL_JTAG_SUPPORTED",
+        "depends on GOSHA_NO_MOTION_SAFE_PROFILE",
+        "depends on GOSHA_SAFE_NEUTRAL_BOOT_PROFILE",
+        "depends on GOSHA_MOTION_LIVE_LOCAL_OPT_IN",
+        "depends on GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN",
+    ):
+        require(dependency in usb_body, f"USB opt-in must keep {dependency}")
+    require("select USJ_ENABLE_USB_SERIAL_JTAG" in usb_body,
+            "USB opt-in must enable the USB Serial/JTAG peripheral driver")
+    require("default n" in usb_body, "USB opt-in must default to off")
+    require("@GOSHA-LIVE:" in usb_body and "USB Serial/JTAG" in usb_body and
+            "secondary" in usb_body,
+            "USB opt-in help must document framing and console separation")
+
 
 def validate_cmake(cmake: str) -> None:
     require("CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN" in cmake, "CMake must handle Live opt-in")
@@ -111,6 +136,16 @@ def validate_cmake(cmake: str) -> None:
     require("NOT EXISTS" in cmake, "profile header path existence must be checked")
     require("GOSHA_MOTION_LIVE_PROFILE_HEADER_ENABLED=1" in cmake, "adapter header macro must be opt-in only")
     require("mbedtls" in cmake, "access_key SHA-256 dependency must be declared")
+    require("esp_driver_usb_serial_jtag" in cmake,
+            "USB Live dependency must be declared for explicit opt-in builds")
+    require("CONFIG_GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN" in cmake,
+            "CMake must guard USB Live opt-in")
+    require("CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED" in cmake and
+            "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG" in cmake and
+            "CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG" in cmake and
+            "CONFIG_ESP_CONSOLE_UART" in cmake and
+            "CONFIG_ESP_CONSOLE_SECONDARY_NONE" in cmake,
+            "USB Live CMake guard must require UART console and no USB console/secondary")
 
 
 def validate_live_wifi(board: str) -> None:
@@ -207,9 +242,18 @@ def validate_adapter(adapter: str, adapter_h: str) -> None:
             "capabilities must expose profile limits even while right-arm initialization is required")
     require("MotionLiveRightArmInitializer" in adapter_h,
             "adapter configure API must carry the right-arm initializer callback")
+    require("MotionLiveJsonSender" in adapter_h and "HandleTransportMessage" in adapter_h,
+            "adapter must expose a common transport sender abstraction")
+    require("HandleWebSocketMessage" in adapter and "httpd_ws_send_frame" in adapter,
+            "WebSocket API must remain as a wrapper over the transport sender")
+    require("HandleTransportMessage(owner_id, root, sender)" in adapter,
+            "WebSocket wrapper must reuse the common transport handler")
+    require("core_.OnTransportClosed(owner_id)" in adapter,
+            "adapter must expose generic transport close disarm")
     require("esp_timer_start_periodic" in adapter and "gosha_live_watchdog" in adapter,
             "watchdog must use a nonblocking periodic timer")
-    require('SendError(req, root, "bad_json"' in adapter, "bad JSON in Live namespace must not fall through to MCP")
+    require('SendError(sender, root, "bad_json"' in adapter,
+            "bad JSON in Live namespace must not fall through to MCP")
 
     init_body = extract_body(adapter, r"if\s*\(std::strcmp\(op,\s*\"initialize_right_arm\"\)\s*==\s*0\)",
                              "initialize_right_arm handler")
@@ -220,7 +264,7 @@ def validate_adapter(adapter: str, adapter_h: str) -> None:
     require("AccessKeyMatches" in init_body, "initialize_right_arm must authenticate the access key")
     require("core_.InitializeRightArm" in init_body,
             "initialize_right_arm must call the core initializer")
-    require("core_.GetCapabilities()" in init_body and "SendCapabilities(req, root, caps)" in init_body,
+    require("core_.GetCapabilities()" in init_body and "SendCapabilities(sender, root, caps)" in init_body,
             "initialize_right_arm success must respond with capabilities and copied request_id")
 
 
@@ -240,6 +284,7 @@ def validate_core(core: str, core_h: str) -> None:
         "kCommissioningJointLimitDegrees = 1.0",
         "kCommissioningMaxServoRateDps = 1.0",
         "kCommissioningRightArmJointLimitDegrees = 5.0",
+        "kMotionLiveUsbOwnerId = -0x47555342",
         '"leg_negative_x"',
         '"leg_positive_x"',
         '"foot_negative_x"',
@@ -336,6 +381,9 @@ def validate_core(core: str, core_h: str) -> None:
             "pose/keepalive must reject expired leases before renewing")
     require("hardware_applier_" in core_h and "ApplyHardware" in core,
             "core must make hardware writes an explicit callback")
+    require("OnTransportClosed" in core and "OnSocketClosed" in core and
+            "OnTransportClosed(owner_socket)" in core,
+            "core must expose transport-close disarm while preserving WebSocket close API")
 
     arm_body = extract_body(core, r"MotionLiveResult\s+MotionLiveCore::Arm\s*\([^)]*\)",
                             "MotionLiveCore::Arm")
@@ -385,6 +433,8 @@ def validate_controller(controller: str, movements: str) -> None:
         "AttachRightHandAtHome",
         "AttachLegsFeetServos",
         "MotionLiveAdapter::GetInstance().ConfigureRuntime(",
+        "StartMotionLiveUsbTransport",
+        '#include "motion_live_usb_transport.h"',
         "right_arm_initializer",
         "GPIO_NUM_NC",
     ):
@@ -434,6 +484,72 @@ def validate_controller(controller: str, movements: str) -> None:
     set_trims_body = extract_body(movements, r"void\s+Otto::SetTrims\s*\([^)]*\)", "Otto::SetTrims")
     require("has_left_hand_" in set_trims_body and "has_right_hand_" in set_trims_body,
             "Otto trims must track a single available right hand")
+
+
+def validate_usb_transport(usb_transport: str, usb_framing: str,
+                           adapter_h: str, core_h: str,
+                           controller: str) -> None:
+    for token in (
+        'kMotionLiveUsbFramePrefix = "@GOSHA-LIVE:"',
+        "kMotionLiveUsbFramePrefixLength = 12",
+        "kMotionLiveUsbMaxJsonBytes = 4096",
+        "kMotionLiveUsbMaxResponseJsonBytes = 16384",
+        "kMotionLiveUsbMaxResponseFrameBytes",
+        "kMotionLiveUsbPartialTimeoutMs = 500",
+        "MotionLiveUsbLineFramer",
+        "MotionLiveUsbFrameStatus::kOverflow",
+        "MotionLiveUsbFrameStatus::kTimeout",
+        "buffer_.reserve(kMotionLiveUsbMaxLineBytes)",
+        "PrefixCanStillMatch",
+        "ResetPartialLine",
+    ):
+        require(token in usb_framing, f"USB framing contract token is missing: {token}")
+    for token in (
+        "CONFIG_GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN",
+        "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED",
+        "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG",
+        "CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG",
+        "CONFIG_ESP_CONSOLE_UART",
+        "usb_serial_jtag_driver_install",
+        "usb_serial_jtag_read_bytes",
+        "usb_serial_jtag_write_bytes",
+        "usb_serial_jtag_is_connected",
+        "usb_serial_jtag_connection_monitor_include",
+        "kMotionLiveUsbMaxJsonBytes",
+        "kMotionLiveUsbMaxResponseJsonBytes",
+        "kMotionLiveUsbMaxResponseFrameBytes",
+        "kMotionLiveUsbOwnerId",
+        "HandleTransportMessage",
+        "OnTransportClosed",
+        "cJSON_ParseWithLengthOpts",
+        "parse_end != json.c_str() + json.size()",
+        "WriteUsbFrame",
+        "DrainUsbRx",
+        "ResetPartialLine",
+        "dispatch skipped while disconnected",
+        "dispatch aborted while disconnected",
+        "malformed or trailing JSON frame discarded",
+        "Live USB frame overflow; session disarmed",
+        "Live USB write failed; session disarmed",
+        "Live USB connection lost; session disarmed",
+        "Live USB partial frame timed out; session disarmed",
+    ):
+        require(token in usb_transport, f"USB transport contract token is missing: {token}")
+    require("McpServer::GetInstance" not in usb_transport,
+            "USB transport must not add a new MCP/Home/OTA path")
+    require("httpd_ws_send_frame" not in usb_transport,
+            "USB transport must not depend on the WebSocket transport")
+    require("access_key" not in "\n".join(line for line in usb_transport.splitlines()
+                                          if "ESP_LOG" in line),
+            "USB transport must not log access_key or command payloads")
+    require("MotionLiveJsonSender" in adapter_h and "HandleTransportMessage" in adapter_h,
+            "USB transport must use the shared adapter sender abstraction")
+    require("kMotionLiveUsbOwnerId" in core_h,
+            "USB owner id must be reserved in the shared core header")
+    require("StartMotionLiveUsbTransport();" in controller,
+            "controller must start USB Live only through the explicit opt-in no-op wrapper")
+    require(usb_transport.count("framer.ResetPartialLine();") >= 3,
+            "USB disconnect/reconnect/dispatch paths must call ResetPartialLine")
 
 
 def validate_prepare(prepare: str) -> None:
@@ -489,6 +605,9 @@ def validate_tree(values: dict[str, str]) -> None:
     validate_adapter(values["adapter"], values["adapter_h"])
     validate_core(values["core"], values["core_h"])
     validate_controller(values["controller"], values["movements"])
+    validate_usb_transport(values["usb_transport"], values["usb_framing"],
+                           values["adapter_h"], values["core_h"],
+                           values["controller"])
     validate_prepare(values["prepare"])
     validate_release(values["release"])
 
@@ -500,9 +619,11 @@ def current_values() -> dict[str, str]:
         "cmake": read(CMAKE),
         "ws": read(WS),
         "adapter": read(ADAPTER),
-        "adapter_h": read(ROOT / "main/boards/gosha-v1/motion_live_adapter.h"),
+        "adapter_h": read(ADAPTER_H),
         "core": read(CORE),
         "core_h": read(CORE_H),
+        "usb_framing": read(USB_FRAMING),
+        "usb_transport": read(USB_TRANSPORT),
         "board": read(BOARD),
         "controller": read(CONTROLLER),
         "movements": read(MOVEMENTS),
@@ -544,6 +665,20 @@ def run_self_test() -> None:
         "depends on GOSHA_MOTION_LIVE_LOCAL_OPT_IN\n    default n\n    help\n        Adds the separate commissioning_right_arm",
         "# removed Live dependency\n    default n\n    help\n        Adds the separate commissioning_right_arm",
         "GOSHA_MOTION_LIVE_LOCAL_OPT_IN",
+    )
+    expect_rejection(
+        values,
+        "kconfig",
+        "depends on GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN\n    select USJ_ENABLE_USB_SERIAL_JTAG",
+        "# removed right-arm USB dependency\n    select USJ_ENABLE_USB_SERIAL_JTAG",
+        "GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN",
+    )
+    expect_rejection(
+        values,
+        "cmake",
+        "CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG OR",
+        "CONFIG_REMOVED_SECONDARY_USB_SERIAL_JTAG OR",
+        "UART console",
     )
     expect_rejection(
         values,
@@ -600,6 +735,48 @@ def run_self_test() -> None:
         "if (!ProfileIsCommissioningRightArm()) {\n        if (!StepTowardTarget(now_ms, &reason, &hardware_changed))",
         "if (true) {\n        if (!StepTowardTarget(now_ms, &reason, &hardware_changed))",
         "keepalive",
+    )
+    expect_rejection(
+        values,
+        "core_h",
+        "kMotionLiveUsbOwnerId = -0x47555342",
+        "kMotionLiveUsbOwnerId = 40",
+        "kMotionLiveUsbOwnerId",
+    )
+    expect_rejection(
+        values,
+        "adapter",
+        "return HandleTransportMessage(owner_id, root, sender);",
+        "return true;",
+        "common transport",
+    )
+    expect_rejection(
+        values,
+        "usb_framing",
+        "kMotionLiveUsbMaxJsonBytes = 4096",
+        "kMotionLiveUsbMaxJsonBytes = 8192",
+        "4096",
+    )
+    expect_rejection(
+        values,
+        "usb_framing",
+        "kMotionLiveUsbMaxResponseJsonBytes = 16384",
+        "kMotionLiveUsbMaxResponseJsonBytes = 12000",
+        "16384",
+    )
+    expect_rejection(
+        values,
+        "usb_transport",
+        "cJSON_ParseWithLengthOpts",
+        "cJSON_ParseWithLength",
+        "ParseWithLengthOpts",
+    )
+    expect_rejection(
+        values,
+        "usb_transport",
+        "framer.ResetPartialLine();",
+        "// removed reset on disconnect;",
+        "ResetPartialLine",
     )
     expect_rejection(
         values,

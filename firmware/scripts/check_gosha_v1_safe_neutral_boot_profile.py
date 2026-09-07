@@ -19,6 +19,7 @@ PROFILE_FLAG = "CONFIG_GOSHA_SAFE_NEUTRAL_BOOT_PROFILE=y"
 NO_MOTION_FLAG = "CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE=y"
 LIVE_FLAG = "CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN=y"
 RIGHT_ARM_FLAG = "CONFIG_GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN=y"
+USB_FLAG = "CONFIG_GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN=y"
 BUILD_NAME = "gosha-v1-safe-neutral-boot"
 
 
@@ -85,7 +86,7 @@ def validate_tree(
         PROFILE_FLAG not in normal.get("sdkconfig_append", []),
         "maintenance flag must not be enabled in the normal gosha-v1 build",
     )
-    for flag in (LIVE_FLAG, RIGHT_ARM_FLAG):
+    for flag in (LIVE_FLAG, RIGHT_ARM_FLAG, USB_FLAG):
         require(flag not in normal.get("sdkconfig_append", []),
                 f"normal build must not enable {flag}")
         require(flag not in maintenance.get("sdkconfig_append", []),
@@ -104,6 +105,12 @@ def validate_tree(
     require("depends on GOSHA_SAFE_NEUTRAL_BOOT_PROFILE" in right_body,
             "right-arm commissioning must require safe-neutral boot")
     require("default n" in right_body, "right-arm commissioning must default to off")
+    usb_body = kconfig_body(kconfig, "GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN")
+    require("depends on GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN" in usb_body,
+            "USB Live must require right-arm commissioning opt-in")
+    require("depends on GOSHA_SAFE_NEUTRAL_BOOT_PROFILE" in usb_body,
+            "USB Live must require safe-neutral boot")
+    require("default n" in usb_body, "USB Live must default to off")
 
     require(
         "CONFIG_GOSHA_SAFE_NEUTRAL_BOOT_PROFILE requires CONFIG_GOSHA_NO_MOTION_SAFE_PROFILE" in controller,

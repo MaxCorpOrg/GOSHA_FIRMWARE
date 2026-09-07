@@ -555,6 +555,30 @@ config GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN
         Home, trim, servo sequences, OTA, reboot and assets writes remain
         closed by the required no-motion/safe-neutral profiles.
 
+config GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN
+    bool "GOSHA v1 local owner Live USB Serial/JTAG transport"
+    depends on BOARD_TYPE_GOSHA_V1
+    depends on SOC_USB_SERIAL_JTAG_SUPPORTED
+    depends on GOSHA_NO_MOTION_SAFE_PROFILE
+    depends on GOSHA_SAFE_NEUTRAL_BOOT_PROFILE
+    depends on GOSHA_MOTION_LIVE_LOCAL_OPT_IN
+    depends on GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN
+    select USJ_ENABLE_USB_SERIAL_JTAG
+    default n
+    help
+        Adds an explicit, local-only USB Serial/JTAG transport for the same
+        gosha.motion.live.v1 adapter and core used by WebSocket Live. Each
+        command is a bounded line framed as @GOSHA-LIVE: followed by compact
+        JSON and LF; responses use the same prefix. This option does not arm,
+        initialize the right arm, attach PWM, or send any pose at boot or USB
+        connection time.
+
+        USB Live builds must keep the firmware console on UART and disable the
+        USB Serial/JTAG primary and secondary console outputs, otherwise logs
+        would mix with @GOSHA-LIVE runtime frames. The legacy MCP motion tools,
+        Home, trim, servo sequences, OTA, reboot and assets writes remain
+        closed by the required no-motion/safe-neutral profiles.
+
 choice
     depends on BOARD_TYPE_LILYGO_T_DISPLAY_P4
     prompt "Select the screen type"

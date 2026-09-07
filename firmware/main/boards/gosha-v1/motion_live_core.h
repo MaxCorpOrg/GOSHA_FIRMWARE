@@ -25,6 +25,7 @@ constexpr const char* kProfileModeCommissioningRightArm = "commissioning_right_a
 constexpr double kCommissioningJointLimitDegrees = 1.0;
 constexpr double kCommissioningMaxServoRateDps = 1.0;
 constexpr double kCommissioningRightArmJointLimitDegrees = 5.0;
+constexpr int kMotionLiveUsbOwnerId = -0x47555342;
 
 enum class JointIndex : int {
     kArmNegativeX = 0,
@@ -177,6 +178,7 @@ public:
                                uint64_t now_ms);
     MotionLiveResult Stop(int owner_socket, const std::string& session_id, uint32_t seq);
     MotionLiveResult Tick(uint64_t now_ms);
+    void OnTransportClosed(int owner_socket);
     void OnSocketClosed(int owner_socket);
 
     bool IsArmed() const { return armed_; }

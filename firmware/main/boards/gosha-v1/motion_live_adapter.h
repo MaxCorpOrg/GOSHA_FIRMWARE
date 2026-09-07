@@ -5,11 +5,14 @@
 #include <esp_http_server.h>
 #include <esp_timer.h>
 
+#include <functional>
 #include <mutex>
 
 #include "motion_live_core.h"
 
 namespace gosha::motion_live {
+
+using MotionLiveJsonSender = std::function<esp_err_t(cJSON*)>;
 
 class MotionLiveAdapter {
 public:
@@ -19,6 +22,9 @@ public:
                           MotionLiveHardwareApplier applier,
                           MotionLiveRightArmInitializer right_arm_initializer);
     bool HandleWebSocketMessage(httpd_req_t* req, cJSON* root);
+    bool HandleTransportMessage(int owner_id, cJSON* root,
+                                const MotionLiveJsonSender& sender);
+    void OnTransportClosed(int owner_id);
     void OnSocketClosed(int socket_fd);
 
 private:
@@ -32,15 +38,17 @@ private:
     std::string GenerateSessionId() const;
     bool AccessKeyMatches(const char* access_key) const;
 
-    esp_err_t SendJsonFrame(httpd_req_t* req, cJSON* root) const;
-    esp_err_t SendError(httpd_req_t* req, cJSON* request, const char* code,
-                        const char* message) const;
-    esp_err_t SendCapabilities(httpd_req_t* req, cJSON* request,
+    esp_err_t SendJsonFrame(const MotionLiveJsonSender& sender, cJSON* root) const;
+    esp_err_t SendError(const MotionLiveJsonSender& sender, cJSON* request,
+                        const char* code, const char* message) const;
+    esp_err_t SendCapabilities(const MotionLiveJsonSender& sender, cJSON* request,
                                const MotionLiveCapabilities& caps) const;
-    esp_err_t SendArmed(httpd_req_t* req, cJSON* request,
+    esp_err_t SendArmed(const MotionLiveJsonSender& sender, cJSON* request,
                         const MotionLiveResult& result) const;
-    esp_err_t SendAck(httpd_req_t* req, const MotionLiveResult& result) const;
-    esp_err_t SendStopped(httpd_req_t* req, const MotionLiveResult& result,
+    esp_err_t SendAck(const MotionLiveJsonSender& sender,
+                      const MotionLiveResult& result) const;
+    esp_err_t SendStopped(const MotionLiveJsonSender& sender,
+                          const MotionLiveResult& result,
                           const std::string& fallback_session_id) const;
 
     MotionLiveCore core_;

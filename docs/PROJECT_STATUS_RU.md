@@ -5,6 +5,56 @@
 правой сервы: в старом манифесте есть перекрёстный тест через левый канал;
 это не подтверждает нынешнее подключение. Новых команд движения нет.
 
+
+## USB Live source implementation — 2026-09-07
+
+В исходниках подготовлен отдельный USB Serial/JTAG transport для существующего
+`gosha.motion.live.v1`. Он включается только явным build-флагом
+`CONFIG_GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN=y` и использует тот же
+`MotionLiveAdapter`, `MotionLiveCore`, mutex, сессию, авторизацию,
+`initialize_right_arm`, single-owner lock, STOP и watchdog, что и WebSocket
+Live. Отдельного core, отдельной авторизации и новых MCP/Home/OTA/routes нет.
+WebSocket API сохранён как wrapper поверх общего sender abstraction.
+
+USB wire contract: порт открывается клиентом как serial 115200; каждая команда —
+одна строка `@GOSHA-LIVE:` + компактный JSON `gosha.motion.live.v1` + LF.
+JSON команды ограничен 4096 байтами. Ответ — тот же prefix + compact JSON + LF;
+JSON ответа ограничен 16384 байтами, prefix и LF входят только в serial envelope.
+Parser bounded: чужие/malformed строки отбрасываются без payload-логов,
+overflow и partial timeout сбрасывают USB-owned сессию. При физической потере USB,
+ошибке write или попытке dispatch без текущего USB connection transport вызывает
+`OnTransportClosed(kMotionLiveUsbOwnerId)`, очищает partial framer/RX и не
+продолжает старые цели после reconnect. `kMotionLiveUsbOwnerId` отрицательный и
+зарезервирован, поэтому не пересекается с WebSocket socket fd.
+
+USB build требует сохранения UART log channel и выключенного USB console output:
+`CONFIG_ESP_CONSOLE_UART_DEFAULT=y` или другой UART console,
+`# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set`,
+`# CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG is not set`,
+`CONFIG_ESP_CONSOLE_SECONDARY_NONE=y`. CMake и source-level guards останавливают
+USB opt-in build, если primary или secondary USB Serial/JTAG console включены,
+поскольку runtime frames не должны смешиваться с логами. Boot ROM chatter на USB
+остаётся вне firmware runtime contract; клиент должен игнорировать всё без prefix.
+
+Безопасность правой руки сохранена: левая рука остаётся NC, правая рука GPIO12 с
+home/neutral 135° доступна только через отдельный authenticated
+`initialize_right_arm`; opening USB, connect/reconnect, hello, arm до init,
+keepalive, STOP и watchdog не включают правый PWM и не отправляют pose. После
+reboot остаются ноги/ступни 90°, правая рука NC до init; пределы остаются
+ноги/ступни ±1°, правая рука ±5° при 1°/с, watchdog 300 мс.
+
+Добавлены host/guard проверки: USB framer проверяет prefix, CRLF, malformed
+строки, 4096-byte command JSON boundary, overflow, partial timeout, NUL reject и
+сброс partial frame на disconnect. `motion_live_core_host_test` дополнительно
+проверяет USB owner против WebSocket owner, чужой STOP, explicit USB STOP и
+watchdog disarm USB-owned сессии. `check_gosha_v1_motion_live_profile.py` и
+`check_gosha_v1_safe_neutral_boot_profile.py` обновлены под новый opt-in, shared
+transport abstraction, strict parse, console separation и checked-in config
+matrix. ESP-IDF build, serial, flash, reset, network и аппаратные команды этим
+исходниковым изменением не выполнялись.
+
+См. отдельный контракт: `docs/MOTION_LIVE_USB_CONTRACT_2026-09-07_RU.md`.
+
 ## Повторная проверка по свежему допуску владельца — 2026-09-07
 
 После подтверждения «рука в нулевом положении, ничего не упирается,

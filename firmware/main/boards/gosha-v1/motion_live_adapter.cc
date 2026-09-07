@@ -248,28 +248,22 @@ bool MotionLiveAdapter::AccessKeyMatches(const char* access_key) const {
     return ConstantTimeEquals64(actual_hex, expected_hex);
 }
 
-esp_err_t MotionLiveAdapter::SendJsonFrame(httpd_req_t* req, cJSON* root) const {
-    char* text = cJSON_PrintUnformatted(root);
-    if (text == nullptr) {
-        ESP_LOGE(TAG, "Live response serialization failed");
-        return ESP_ERR_NO_MEM;
+esp_err_t MotionLiveAdapter::SendJsonFrame(const MotionLiveJsonSender& sender,
+                                            cJSON* root) const {
+    if (!sender) {
+        ESP_LOGE(TAG, "Live response sender is unavailable");
+        return ESP_ERR_INVALID_ARG;
     }
-
-    httpd_ws_frame_t frame = {};
-    frame.type = HTTPD_WS_TYPE_TEXT;
-    frame.payload = reinterpret_cast<uint8_t*>(text);
-    frame.len = std::strlen(text);
-
-    esp_err_t ret = httpd_ws_send_frame(req, &frame);
+    esp_err_t ret = sender(root);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Live response send failed: %d", ret);
     }
-    cJSON_free(text);
     return ret;
 }
 
-esp_err_t MotionLiveAdapter::SendError(httpd_req_t* req, cJSON* request,
-                                       const char* code, const char* message) const {
+esp_err_t MotionLiveAdapter::SendError(const MotionLiveJsonSender& sender,
+                                       cJSON* request, const char* code,
+                                       const char* message) const {
     cJSON* reply = cJSON_CreateObject();
     if (reply == nullptr) {
         return ESP_ERR_NO_MEM;
@@ -280,12 +274,13 @@ esp_err_t MotionLiveAdapter::SendError(httpd_req_t* req, cJSON* request,
     cJSON_AddStringToObject(reply, "message", message);
     CopyRequestField(reply, request, "request_id", "request_id");
     CopyRequestField(reply, request, "session_id", "session_id");
-    esp_err_t ret = SendJsonFrame(req, reply);
+    esp_err_t ret = SendJsonFrame(sender, reply);
     cJSON_Delete(reply);
     return ret;
 }
 
-esp_err_t MotionLiveAdapter::SendCapabilities(httpd_req_t* req, cJSON* request,
+esp_err_t MotionLiveAdapter::SendCapabilities(const MotionLiveJsonSender& sender,
+                                              cJSON* request,
                                               const MotionLiveCapabilities& caps) const {
     cJSON* reply = cJSON_CreateObject();
     if (reply == nullptr) {
@@ -339,12 +334,13 @@ esp_err_t MotionLiveAdapter::SendCapabilities(httpd_req_t* req, cJSON* request,
         cJSON_AddItemToObject(reply, "feedback", feedback);
     }
 
-    esp_err_t ret = SendJsonFrame(req, reply);
+    esp_err_t ret = SendJsonFrame(sender, reply);
     cJSON_Delete(reply);
     return ret;
 }
 
-esp_err_t MotionLiveAdapter::SendArmed(httpd_req_t* req, cJSON* request,
+esp_err_t MotionLiveAdapter::SendArmed(const MotionLiveJsonSender& sender,
+                                       cJSON* request,
                                        const MotionLiveResult& result) const {
     cJSON* reply = cJSON_CreateObject();
     if (reply == nullptr) {
@@ -357,12 +353,13 @@ esp_err_t MotionLiveAdapter::SendArmed(httpd_req_t* req, cJSON* request,
     const MotionLivePreparedProfile* profile = PreparedProfileOrNull();
     cJSON_AddStringToObject(reply, "calibration_id",
                             profile == nullptr ? "" : profile->calibration_id);
-    esp_err_t ret = SendJsonFrame(req, reply);
+    esp_err_t ret = SendJsonFrame(sender, reply);
     cJSON_Delete(reply);
     return ret;
 }
 
-esp_err_t MotionLiveAdapter::SendAck(httpd_req_t* req, const MotionLiveResult& result) const {
+esp_err_t MotionLiveAdapter::SendAck(const MotionLiveJsonSender& sender,
+                                     const MotionLiveResult& result) const {
     cJSON* reply = cJSON_CreateObject();
     if (reply == nullptr) {
         return ESP_ERR_NO_MEM;
@@ -374,12 +371,13 @@ esp_err_t MotionLiveAdapter::SendAck(httpd_req_t* req, const MotionLiveResult& r
     AddPoseObject(reply, "commanded_pose", result.commanded_pose);
     cJSON_AddNullToObject(reply, "measured_pose");
     cJSON_AddNullToObject(reply, "tilt");
-    esp_err_t ret = SendJsonFrame(req, reply);
+    esp_err_t ret = SendJsonFrame(sender, reply);
     cJSON_Delete(reply);
     return ret;
 }
 
-esp_err_t MotionLiveAdapter::SendStopped(httpd_req_t* req, const MotionLiveResult& result,
+esp_err_t MotionLiveAdapter::SendStopped(const MotionLiveJsonSender& sender,
+                                         const MotionLiveResult& result,
                                          const std::string& fallback_session_id) const {
     cJSON* reply = cJSON_CreateObject();
     if (reply == nullptr) {
@@ -392,12 +390,34 @@ esp_err_t MotionLiveAdapter::SendStopped(httpd_req_t* req, const MotionLiveResul
     AddPoseObject(reply, "commanded_pose", result.commanded_pose);
     cJSON_AddNullToObject(reply, "measured_pose");
     cJSON_AddNullToObject(reply, "tilt");
-    esp_err_t ret = SendJsonFrame(req, reply);
+    esp_err_t ret = SendJsonFrame(sender, reply);
     cJSON_Delete(reply);
     return ret;
 }
 
 bool MotionLiveAdapter::HandleWebSocketMessage(httpd_req_t* req, cJSON* root) {
+    const int owner_id = httpd_req_to_sockfd(req);
+    MotionLiveJsonSender sender = [req](cJSON* reply) -> esp_err_t {
+        char* text = cJSON_PrintUnformatted(reply);
+        if (text == nullptr) {
+            ESP_LOGE(TAG, "Live response serialization failed");
+            return ESP_ERR_NO_MEM;
+        }
+
+        httpd_ws_frame_t frame = {};
+        frame.type = HTTPD_WS_TYPE_TEXT;
+        frame.payload = reinterpret_cast<uint8_t*>(text);
+        frame.len = std::strlen(text);
+
+        esp_err_t ret = httpd_ws_send_frame(req, &frame);
+        cJSON_free(text);
+        return ret;
+    };
+    return HandleTransportMessage(owner_id, root, sender);
+}
+
+bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
+                                               const MotionLiveJsonSender& sender) {
     if (!IsObject(root)) {
         return false;
     }
@@ -407,11 +427,10 @@ bool MotionLiveAdapter::HandleWebSocketMessage(httpd_req_t* req, cJSON* root) {
 
     cJSON* op_item = cJSON_GetObjectItem(root, "op");
     if (!cJSON_IsString(op_item) || op_item->valuestring == nullptr) {
-        SendError(req, root, "bad_json", "Live op is required");
+        SendError(sender, root, "bad_json", "Live op is required");
         return true;
     }
 
-    const int owner_socket = httpd_req_to_sockfd(req);
     const char* op = op_item->valuestring;
 
     if (std::strcmp(op, "hello") == 0) {
@@ -420,7 +439,7 @@ bool MotionLiveAdapter::HandleWebSocketMessage(httpd_req_t* req, cJSON* root) {
             std::lock_guard<std::mutex> lock(mutex_);
             caps = core_.GetCapabilities();
         }
-        SendCapabilities(req, root, caps);
+        SendCapabilities(sender, root, caps);
         return true;
     }
 
@@ -429,7 +448,7 @@ bool MotionLiveAdapter::HandleWebSocketMessage(httpd_req_t* req, cJSON* root) {
         std::string calibration_id;
         if (!ReadString(root, "request_id", &request_id) ||
             !ReadString(root, "calibration_id", &calibration_id)) {
-            SendError(req, root, "bad_json",
+            SendError(sender, root, "bad_json",
                       "Live initialize_right_arm requires request_id and calibration_id");
             return true;
         }
@@ -440,15 +459,15 @@ bool MotionLiveAdapter::HandleWebSocketMessage(httpd_req_t* req, cJSON* root) {
         MotionLiveCapabilities caps;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = core_.InitializeRightArm(owner_socket, calibration_id, access_ok);
+            result = core_.InitializeRightArm(owner_id, calibration_id, access_ok);
             if (result.ok) {
                 caps = core_.GetCapabilities();
             }
         }
         if (result.ok) {
-            SendCapabilities(req, root, caps);
+            SendCapabilities(sender, root, caps);
         } else {
-            SendError(req, root, result.code, result.message);
+            SendError(sender, root, result.code, result.message);
         }
         return true;
     }
@@ -456,7 +475,7 @@ bool MotionLiveAdapter::HandleWebSocketMessage(httpd_req_t* req, cJSON* root) {
     if (std::strcmp(op, "arm") == 0) {
         std::string calibration_id;
         if (!ReadString(root, "calibration_id", &calibration_id)) {
-            SendError(req, root, "bad_json", "Live calibration_id is required");
+            SendError(sender, root, "bad_json", "Live calibration_id is required");
             return true;
         }
         cJSON* key = cJSON_GetObjectItem(root, "access_key");
@@ -465,13 +484,13 @@ bool MotionLiveAdapter::HandleWebSocketMessage(httpd_req_t* req, cJSON* root) {
         MotionLiveResult result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = core_.Arm(owner_socket, calibration_id, access_ok,
+            result = core_.Arm(owner_id, calibration_id, access_ok,
                                GenerateSessionId(), NowMs());
         }
         if (result.ok) {
-            SendArmed(req, root, result);
+            SendArmed(sender, root, result);
         } else {
-            SendError(req, root, result.code, result.message);
+            SendError(sender, root, result.code, result.message);
         }
         return true;
     }
@@ -483,19 +502,19 @@ bool MotionLiveAdapter::HandleWebSocketMessage(httpd_req_t* req, cJSON* root) {
         if (!ReadString(root, "session_id", &session_id) ||
             !ReadSeq(root, &seq) ||
             !ReadNumber(root, "speed_dps", &speed_dps)) {
-            SendError(req, root, "bad_json", "Live pose requires session_id, seq and speed_dps");
+            SendError(sender, root, "bad_json", "Live pose requires session_id, seq and speed_dps");
             return true;
         }
         MotionLiveTarget target = ReadTarget(root);
         MotionLiveResult result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = core_.Pose(owner_socket, session_id, seq, target, speed_dps, NowMs());
+            result = core_.Pose(owner_id, session_id, seq, target, speed_dps, NowMs());
         }
         if (result.ok) {
-            SendAck(req, result);
+            SendAck(sender, result);
         } else {
-            SendError(req, root, result.code, result.message);
+            SendError(sender, root, result.code, result.message);
         }
         return true;
     }
@@ -504,18 +523,18 @@ bool MotionLiveAdapter::HandleWebSocketMessage(httpd_req_t* req, cJSON* root) {
         std::string session_id;
         uint32_t seq = 0;
         if (!ReadString(root, "session_id", &session_id) || !ReadSeq(root, &seq)) {
-            SendError(req, root, "bad_json", "Live keepalive requires session_id and seq");
+            SendError(sender, root, "bad_json", "Live keepalive requires session_id and seq");
             return true;
         }
         MotionLiveResult result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = core_.Keepalive(owner_socket, session_id, seq, NowMs());
+            result = core_.Keepalive(owner_id, session_id, seq, NowMs());
         }
         if (result.ok) {
-            SendAck(req, result);
+            SendAck(sender, result);
         } else {
-            SendError(req, root, result.code, result.message);
+            SendError(sender, root, result.code, result.message);
         }
         return true;
     }
@@ -524,29 +543,33 @@ bool MotionLiveAdapter::HandleWebSocketMessage(httpd_req_t* req, cJSON* root) {
         std::string session_id;
         uint32_t seq = 0;
         if (!ReadString(root, "session_id", &session_id) || !ReadSeq(root, &seq)) {
-            SendError(req, root, "bad_json", "Live stop requires session_id and seq");
+            SendError(sender, root, "bad_json", "Live stop requires session_id and seq");
             return true;
         }
         MotionLiveResult result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = core_.Stop(owner_socket, session_id, seq);
+            result = core_.Stop(owner_id, session_id, seq);
         }
         if (result.stopped) {
-            SendStopped(req, result, session_id);
+            SendStopped(sender, result, session_id);
         } else {
-            SendError(req, root, result.code, result.message);
+            SendError(sender, root, result.code, result.message);
         }
         return true;
     }
 
-    SendError(req, root, "bad_json", "Unknown Live op");
+    SendError(sender, root, "bad_json", "Unknown Live op");
     return true;
 }
 
-void MotionLiveAdapter::OnSocketClosed(int socket_fd) {
+void MotionLiveAdapter::OnTransportClosed(int owner_id) {
     std::lock_guard<std::mutex> lock(mutex_);
-    core_.OnSocketClosed(socket_fd);
+    core_.OnTransportClosed(owner_id);
+}
+
+void MotionLiveAdapter::OnSocketClosed(int socket_fd) {
+    OnTransportClosed(socket_fd);
 }
 
 }  // namespace gosha::motion_live

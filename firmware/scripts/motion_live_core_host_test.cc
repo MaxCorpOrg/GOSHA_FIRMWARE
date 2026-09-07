@@ -13,6 +13,7 @@ using gosha::motion_live::MotionLiveRuntimeConfig;
 using gosha::motion_live::MotionLiveTarget;
 using gosha::motion_live::ServoSlot;
 using gosha::motion_live::kPoseJointCount;
+using gosha::motion_live::kMotionLiveUsbOwnerId;
 using gosha::motion_live::kRightArmHomeDegrees;
 
 #define CHECK(condition)                                                                  \
@@ -608,6 +609,38 @@ int main() {
             40, right_armed.session_id, 1, RightArmTarget(0, 0, 0, 0, -5), 1, 56010);
         CHECK(!after_close.ok);
         CHECK(std::string(after_close.code) == "session_not_owner");
+
+        CHECK(kMotionLiveUsbOwnerId < 0);
+        right_armed = right_core.Arm(
+            kMotionLiveUsbOwnerId, right_profile.calibration_id, true,
+            "session_right_usb_owner", 56500);
+        CHECK(right_armed.ok);
+        auto ws_keepalive = right_core.Keepalive(40, right_armed.session_id, 1, 56510);
+        CHECK(!ws_keepalive.ok);
+        CHECK(std::string(ws_keepalive.code) == "session_not_owner");
+        CHECK(right_core.IsArmed());
+        right_core.OnTransportClosed(40);
+        CHECK(right_core.IsArmed());
+        auto ws_stop = right_core.Stop(40, right_armed.session_id, 1);
+        CHECK(!ws_stop.stopped);
+        CHECK(std::string(ws_stop.code) == "session_not_owner");
+        CHECK(right_core.IsArmed());
+        auto usb_stop = right_core.Stop(kMotionLiveUsbOwnerId, right_armed.session_id, 1);
+        CHECK(usb_stop.stopped);
+        CHECK(!right_core.IsArmed());
+
+        right_armed = right_core.Arm(
+            kMotionLiveUsbOwnerId, right_profile.calibration_id, true,
+            "session_right_usb_watchdog", 57000);
+        CHECK(right_armed.ok);
+        CHECK(!right_core.Tick(57300).stopped);
+        auto usb_timeout = right_core.Tick(57301);
+        CHECK(usb_timeout.stopped);
+        CHECK(std::string(usb_timeout.code) == "watchdog_timeout");
+        CHECK(!right_core.IsArmed());
+        auto late_usb_stop = right_core.Stop(kMotionLiveUsbOwnerId, right_armed.session_id, 1);
+        CHECK(!late_usb_stop.stopped);
+        CHECK(std::string(late_usb_stop.code) == "session_not_owner");
 
         MotionLivePreparedProfile wrong_direction = RightArmCommissioningProfile();
         wrong_direction.joints[4].direction = -1;

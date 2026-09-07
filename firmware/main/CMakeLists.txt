@@ -881,6 +881,7 @@ idf_component_register(SRCS ${SOURCES}
                         esp_driver_spi
                         esp_driver_i2c
                         esp_driver_i2s
+                        esp_driver_usb_serial_jtag
                         esp_driver_jpeg
                         esp_driver_ppa
                         esp_app_format
@@ -922,6 +923,17 @@ if(CONFIG_BOARD_TYPE_GOSHA_V1)
                             PRIVATE GOSHA_MOTION_LIVE_PROFILE_HEADER_ENABLED=1
                             PRIVATE "GOSHA_MOTION_LIVE_PROFILE_HEADER=\"${GOSHA_MOTION_LIVE_PROFILE_HEADER}\""
                             )
+    endif()
+    if(CONFIG_GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN)
+        if(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED OR
+           CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG OR
+           CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG OR
+           NOT CONFIG_ESP_CONSOLE_UART)
+            message(FATAL_ERROR
+                "CONFIG_GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN requires UART console "
+                "and CONFIG_ESP_CONSOLE_SECONDARY_NONE so @GOSHA-LIVE USB frames "
+                "do not mix with firmware logs")
+        endif()
     endif()
 endif()
 

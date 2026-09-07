@@ -14,6 +14,7 @@
 #include "config.h"
 #include "mcp_server.h"
 #include "motion_live_adapter.h"
+#include "motion_live_usb_transport.h"
 #include "otto_movements.h"
 #include "power_manager.h"
 #include "sdkconfig.h"
@@ -619,6 +620,7 @@ private:
         };
         gosha::motion_live::MotionLiveAdapter::GetInstance().ConfigureRuntime(
             runtime, applier, right_arm_initializer);
+        gosha::motion_live::StartMotionLiveUsbTransport();
     }
 
 public:

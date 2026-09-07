@@ -1048,7 +1048,7 @@ MotionLiveResult MotionLiveCore::Tick(uint64_t now_ms) {
     return DisarmWithError(kWatchdogTimeout, "Live watchdog timed out", true);
 }
 
-void MotionLiveCore::OnSocketClosed(int owner_socket) {
+void MotionLiveCore::OnTransportClosed(int owner_socket) {
     if (armed_ && owner_socket == owner_socket_) {
         armed_ = false;
         owner_socket_ = -1;
@@ -1060,6 +1060,10 @@ void MotionLiveCore::OnSocketClosed(int owner_socket) {
         target_pose_ = commanded_pose_;
         commissioning_servo_index_ = -1;
     }
+}
+
+void MotionLiveCore::OnSocketClosed(int owner_socket) {
+    OnTransportClosed(owner_socket);
 }
 
 }  // namespace gosha::motion_live
