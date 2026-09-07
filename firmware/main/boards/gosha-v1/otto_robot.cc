@@ -40,6 +40,12 @@ constexpr bool kSafeNeutralBootProfile = true;
 constexpr bool kSafeNeutralBootProfile = false;
 #endif
 
+#ifdef CONFIG_GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN
+constexpr bool kMotionLiveRightArmLocalOptIn = true;
+#else
+constexpr bool kMotionLiveRightArmLocalOptIn = false;
+#endif
+
 }  // namespace
 
 class OttoRobot : public WifiBoard {
@@ -264,7 +270,12 @@ private:
             control_config.right_foot_pin = GPIO_NUM_NC;
             ESP_LOGE(TAG, "Maintenance safe-neutral boot запрещён для camera-варианта: все servo PWM отключены");
         } else {
-            ESP_LOGW(TAG, "Maintenance safe-neutral boot использует non-camera ноги/ступни и отключает оба канала рук");
+            if (kMotionLiveRightArmLocalOptIn) {
+                control_config.right_hand_pin = hw_config_.right_hand_pin;
+                ESP_LOGW(TAG, "Maintenance safe-neutral boot использует non-camera ноги/ступни; левая рука отключена, правая рука подготовлена без boot PWM");
+            } else {
+                ESP_LOGW(TAG, "Maintenance safe-neutral boot использует non-camera ноги/ступни и отключает оба канала рук");
+            }
         }
 
         ::InitializeOttoController(control_config);

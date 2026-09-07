@@ -18,13 +18,35 @@ DEFAULT_OUTPUT = ROOT / "local_only/gosha_motion_live_profile.h"
 PROFILE_ID = "gosha-preview-v1"
 PROFILE_MODE_VERIFIED = "verified"
 PROFILE_MODE_COMMISSIONING = "commissioning"
+PROFILE_MODE_COMMISSIONING_RIGHT_ARM = "commissioning_right_arm"
 WATCHDOG_MS = 300
 MIN_RATE_HZ = 5
 MAX_RATE_HZ = 20
 MAX_SPEED_DPS = 30
 COMMISSIONING_LIMIT_DEGREES = 1.0
 COMMISSIONING_MAX_SPEED_DPS = 1.0
+RIGHT_ARM_HOME_DEGREES = 135
+RIGHT_ARM_LIMIT_DEGREES = 5.0
 CALIBRATION_RE = re.compile(r"^[a-f0-9]{64}$")
+
+LOWER_BODY_JOINT_IDS = (
+    "leg_negative_x",
+    "leg_positive_x",
+    "foot_negative_x",
+    "foot_positive_x",
+)
+RIGHT_ARM_JOINT_IDS = LOWER_BODY_JOINT_IDS + ("arm_positive_x",)
+MODE_JOINT_IDS = {
+    PROFILE_MODE_VERIFIED: set(LOWER_BODY_JOINT_IDS),
+    PROFILE_MODE_COMMISSIONING: set(LOWER_BODY_JOINT_IDS),
+    PROFILE_MODE_COMMISSIONING_RIGHT_ARM: set(RIGHT_ARM_JOINT_IDS),
+}
+LOWER_BODY_SERVO_KEYS = {"left_leg", "right_leg", "left_foot", "right_foot"}
+MODE_SERVO_KEYS = {
+    PROFILE_MODE_VERIFIED: LOWER_BODY_SERVO_KEYS,
+    PROFILE_MODE_COMMISSIONING: LOWER_BODY_SERVO_KEYS,
+    PROFILE_MODE_COMMISSIONING_RIGHT_ARM: LOWER_BODY_SERVO_KEYS | {"right_hand"},
+}
 
 UI_JOINTS = {
     "leg_negative_x": {
@@ -47,13 +69,20 @@ UI_JOINTS = {
         "ui_min": -30,
         "ui_max": 30,
     },
+    "arm_positive_x": {
+        "servo_group": "arm",
+        "ui_min": -70,
+        "ui_max": 70,
+    },
 }
 
 SERVO_SLOTS = {
-    "left_leg": {"servo_group": "leg", "servo_index": 0, "pin": 17},
-    "right_leg": {"servo_group": "leg", "servo_index": 1, "pin": 39},
-    "left_foot": {"servo_group": "foot", "servo_index": 2, "pin": 18},
-    "right_foot": {"servo_group": "foot", "servo_index": 3, "pin": 38},
+    "left_leg": {"servo_group": "leg", "servo_index": 0, "pin": 17, "neutral": 90},
+    "right_leg": {"servo_group": "leg", "servo_index": 1, "pin": 39, "neutral": 90},
+    "left_foot": {"servo_group": "foot", "servo_index": 2, "pin": 18, "neutral": 90},
+    "right_foot": {"servo_group": "foot", "servo_index": 3, "pin": 38, "neutral": 90},
+    "left_hand": {"servo_group": "arm", "servo_index": 4, "pin": 8, "neutral": 45},
+    "right_hand": {"servo_group": "arm", "servo_index": 5, "pin": 12, "neutral": RIGHT_ARM_HOME_DEGREES},
 }
 
 
@@ -88,17 +117,40 @@ def validate_access_key(value: Any) -> str:
     return value
 
 
+def require_commissioning_limits(joint_id: str, relative_min: float, relative_max: float,
+                                 max_speed: float, limit: float) -> None:
+    require(relative_min == -limit and relative_max == limit,
+            f"{joint_id}: commissioning limits must be exactly [{-limit:+g},{limit:+g}] degrees")
+    require(max_speed <= COMMISSIONING_MAX_SPEED_DPS,
+            f"{joint_id}: commissioning max_speed_dps must be <= {COMMISSIONING_MAX_SPEED_DPS}")
+
+
 def validate_joint(raw: Any, mode: str) -> dict[str, Any]:
     require(isinstance(raw, dict), "each joint entry must be an object")
     joint_id = raw.get("id")
-    require(isinstance(joint_id, str) and joint_id in UI_JOINTS, "joint id must be one of the four lower-body ids")
+    require(isinstance(joint_id, str) and joint_id in UI_JOINTS,
+            "joint id must be one of the allowed Motion Studio ids")
+    require(joint_id in MODE_JOINT_IDS[mode], f"{joint_id}: joint is not available in {mode}")
     expected_joint = UI_JOINTS[joint_id]
+
     servo_key = raw.get("servo_key")
     require(isinstance(servo_key, str) and servo_key in SERVO_SLOTS,
             f"{joint_id}: servo_key must be explicit and checked by the owner")
+    require(servo_key in MODE_SERVO_KEYS[mode],
+            f"{joint_id}: servo_key {servo_key} is not available in {mode}")
+    require(servo_key != "left_hand", "left_hand is unavailable: the physical left arm is disconnected")
     expected_servo = SERVO_SLOTS[servo_key]
     require(expected_servo["servo_group"] == expected_joint["servo_group"],
             f"{joint_id}: servo_key must stay within the {expected_joint['servo_group']} pair")
+    if joint_id == "arm_positive_x":
+        require(mode == PROFILE_MODE_COMMISSIONING_RIGHT_ARM,
+                "arm_positive_x is available only in commissioning_right_arm")
+        require(servo_key == "right_hand",
+                "arm_positive_x must bind to right_hand slot5 GPIO12")
+    else:
+        require(servo_key in LOWER_BODY_SERVO_KEYS,
+                f"{joint_id}: lower-body joints must not bind to hand slots")
+
     if "servo_index" in raw:
         require(as_int(raw["servo_index"], f"{joint_id}.servo_index") == expected_servo["servo_index"],
                 f"{joint_id}: servo_index does not match selected servo_key")
@@ -109,10 +161,13 @@ def validate_joint(raw: Any, mode: str) -> dict[str, Any]:
     require(-50 <= trim <= 50, f"{joint_id}: trim must be within -50..50 degrees")
 
     neutral = as_int(raw.get("neutral_degrees"), f"{joint_id}.neutral_degrees")
-    require(neutral == 90, f"{joint_id}: neutral_degrees must stay 90 for the installed controller")
+    require(neutral == expected_servo["neutral"],
+            f"{joint_id}: neutral_degrees must stay {expected_servo['neutral']} for the installed controller")
 
     direction = as_int(raw.get("direction"), f"{joint_id}.direction")
     require(direction in (-1, 1), f"{joint_id}: direction must be -1 or 1")
+    if joint_id == "arm_positive_x":
+        require(direction == 1, "arm_positive_x must use direction +1 so relative -5 commands servo 130")
 
     relative_min = as_number(raw.get("min"), f"{joint_id}.min")
     relative_max = as_number(raw.get("max"), f"{joint_id}.max")
@@ -131,11 +186,18 @@ def validate_joint(raw: Any, mode: str) -> dict[str, Any]:
     max_speed = as_number(raw.get("max_speed_dps"), f"{joint_id}.max_speed_dps")
     require(0 < max_speed <= MAX_SPEED_DPS, f"{joint_id}: max_speed_dps must be <= {MAX_SPEED_DPS}")
     if mode == PROFILE_MODE_COMMISSIONING:
-        require(relative_min == -COMMISSIONING_LIMIT_DEGREES and
-                relative_max == COMMISSIONING_LIMIT_DEGREES,
-                f"{joint_id}: commissioning limits must be exactly [-1,+1] degrees")
-        require(max_speed <= COMMISSIONING_MAX_SPEED_DPS,
-                f"{joint_id}: commissioning max_speed_dps must be <= {COMMISSIONING_MAX_SPEED_DPS}")
+        require_commissioning_limits(joint_id, relative_min, relative_max, max_speed,
+                                     COMMISSIONING_LIMIT_DEGREES)
+    if mode == PROFILE_MODE_COMMISSIONING_RIGHT_ARM:
+        if joint_id == "arm_positive_x":
+            require_commissioning_limits(joint_id, relative_min, relative_max, max_speed,
+                                         RIGHT_ARM_LIMIT_DEGREES)
+            require(servo_min == RIGHT_ARM_HOME_DEGREES - 5 and
+                    servo_max == RIGHT_ARM_HOME_DEGREES + 5,
+                    "arm_positive_x must stay within servo 130..140 from rightHome135")
+        else:
+            require_commissioning_limits(joint_id, relative_min, relative_max, max_speed,
+                                         COMMISSIONING_LIMIT_DEGREES)
 
     return {
         "id": joint_id,
@@ -157,8 +219,8 @@ def validate_profile(raw: Any) -> dict[str, Any]:
     require(isinstance(raw, dict), "profile JSON must be an object")
     require(raw.get("profile_id") == PROFILE_ID, f"profile_id must be {PROFILE_ID}")
     mode = raw.get("mode", PROFILE_MODE_VERIFIED)
-    require(mode in (PROFILE_MODE_VERIFIED, PROFILE_MODE_COMMISSIONING),
-            "mode must be verified or commissioning")
+    require(mode in MODE_JOINT_IDS,
+            "mode must be verified, commissioning or commissioning_right_arm")
     access_key = validate_access_key(raw.get("access_key"))
     watchdog_ms = as_int(raw.get("watchdog_ms", WATCHDOG_MS), "watchdog_ms")
     require(watchdog_ms == WATCHDOG_MS, "watchdog_ms must be exactly 300")
@@ -166,13 +228,15 @@ def validate_profile(raw: Any) -> dict[str, Any]:
     require(MIN_RATE_HZ <= max_rate_hz <= MAX_RATE_HZ, "max_rate_hz must be within 5..20")
     require(1000 / max_rate_hz <= watchdog_ms / 2, "max_rate_hz interval must fit watchdog/2")
 
+    expected_joint_ids = MODE_JOINT_IDS[mode]
     joints_raw = raw.get("joints")
-    require(isinstance(joints_raw, list) and len(joints_raw) == len(UI_JOINTS),
-            "joints must contain exactly the four lower-body entries")
+    require(isinstance(joints_raw, list) and len(joints_raw) == len(expected_joint_ids),
+            f"joints must contain exactly {len(expected_joint_ids)} entries for {mode}")
     joints = [validate_joint(item, mode) for item in joints_raw]
-    require({item["id"] for item in joints} == set(UI_JOINTS), "joints must cover each lower-body id once")
-    require({item["servo_key"] for item in joints} == set(SERVO_SLOTS),
-            "joints must bind each lower-body servo_key once")
+    require({item["id"] for item in joints} == expected_joint_ids,
+            f"joints must cover each {mode} id once")
+    require({item["servo_key"] for item in joints} == MODE_SERVO_KEYS[mode],
+            f"joints must bind each {mode} servo_key once")
     joints.sort(key=lambda item: item["servo_index"])
 
     calibration_payload = {
@@ -257,6 +321,7 @@ def render_header(profile: dict[str, Any]) -> str:
     lines.extend([
         "    }},",
         f"    {cpp_string(profile['mode'])},",
+        f"    {len(profile['joints'])},",
         "};",
         "",
         "}  // namespace gosha::motion_live",
@@ -270,10 +335,10 @@ def load_json(path: Path) -> Any:
         return json.load(f)
 
 
-def run_self_test() -> None:
+def lower_body_sample(mode: str) -> dict[str, Any]:
     sample = {
         "profile_id": PROFILE_ID,
-        "mode": PROFILE_MODE_VERIFIED,
+        "mode": mode,
         "access_key": "LiveKey-20260906-Q4bz!",
         "watchdog_ms": 300,
         "max_rate_hz": 20,
@@ -292,75 +357,131 @@ def run_self_test() -> None:
              "servo_max_degrees": 98, "max_speed_dps": 12},
         ],
     }
-    profile = validate_profile(sample)
-    require(profile["mode"] == PROFILE_MODE_VERIFIED, "verified profile mode changed")
-    require(CALIBRATION_RE.fullmatch(profile["calibration_id"]) is not None,
+    if mode in (PROFILE_MODE_COMMISSIONING, PROFILE_MODE_COMMISSIONING_RIGHT_ARM):
+        for joint in sample["joints"]:
+            joint["min"] = -1
+            joint["max"] = 1
+            joint["servo_min_degrees"] = 89
+            joint["servo_max_degrees"] = 91
+            joint["max_speed_dps"] = 1
+    if mode == PROFILE_MODE_COMMISSIONING_RIGHT_ARM:
+        sample["joints"].append({
+            "id": "arm_positive_x",
+            "servo_key": "right_hand",
+            "servo_index": 5,
+            "pin": 12,
+            "trim": 0,
+            "neutral_degrees": RIGHT_ARM_HOME_DEGREES,
+            "direction": 1,
+            "min": -5,
+            "max": 5,
+            "servo_min_degrees": 130,
+            "servo_max_degrees": 140,
+            "max_speed_dps": 1,
+        })
+    return sample
+
+
+def expect_rejection(sample: dict[str, Any], needle: str) -> None:
+    try:
+        validate_profile(sample)
+    except ProfileError as exc:
+        require(needle in str(exc), f"negative test did not report {needle}: {exc}")
+    else:
+        raise ProfileError(f"negative test was accepted: {needle}")
+
+
+def run_self_test() -> None:
+    verified = lower_body_sample(PROFILE_MODE_VERIFIED)
+    verified_profile = validate_profile(verified)
+    require(verified_profile["mode"] == PROFILE_MODE_VERIFIED, "verified profile mode changed")
+    require(CALIBRATION_RE.fullmatch(verified_profile["calibration_id"]) is not None,
             "computed calibration_id is not 64 lowercase hex")
-    header = render_header(profile)
+    header = render_header(verified_profile)
     require("LiveKey-20260906-Q4bz!" not in header, "header leaked plaintext access_key")
-    require(profile["access_key_sha256"] in header, "header did not contain access_key hash")
+    require(verified_profile["access_key_sha256"] in header, "header did not contain access_key hash")
+    require('"verified"' in header and "    4," in header, "header did not preserve 4-joint mode")
     with tempfile.TemporaryDirectory() as tmp:
         output = Path(tmp) / "gosha_motion_live_profile.h"
         output.write_text(header, encoding="utf-8")
         require(output.read_text(encoding="utf-8") == header, "self-test header write failed")
 
-    commissioning = json.loads(json.dumps(sample))
-    commissioning["mode"] = PROFILE_MODE_COMMISSIONING
-    for joint in commissioning["joints"]:
-        joint["min"] = -1
-        joint["max"] = 1
-        joint["servo_min_degrees"] = 89
-        joint["servo_max_degrees"] = 91
-        joint["max_speed_dps"] = 1
+    commissioning = lower_body_sample(PROFILE_MODE_COMMISSIONING)
     commissioning_profile = validate_profile(commissioning)
     require(commissioning_profile["mode"] == PROFILE_MODE_COMMISSIONING,
             "commissioning profile mode changed")
-    require(commissioning_profile["calibration_id"] != profile["calibration_id"],
+    require(commissioning_profile["calibration_id"] != verified_profile["calibration_id"],
             "commissioning mode must be included in computed calibration_id")
     commissioning_header = render_header(commissioning_profile)
     require('"commissioning"' in commissioning_header, "header did not mark commissioning mode")
     require("LiveKey-20260906-Q4bz!" not in commissioning_header,
             "commissioning header leaked plaintext access_key")
 
+    right_arm = lower_body_sample(PROFILE_MODE_COMMISSIONING_RIGHT_ARM)
+    right_arm_profile = validate_profile(right_arm)
+    right_header = render_header(right_arm_profile)
+    require(right_arm_profile["mode"] == PROFILE_MODE_COMMISSIONING_RIGHT_ARM,
+            "right-arm commissioning profile mode changed")
+    require(right_arm_profile["calibration_id"] not in {
+        verified_profile["calibration_id"], commissioning_profile["calibration_id"]},
+        "commissioning_right_arm mode and fifth joint must be included in computed calibration_id")
+    require('"commissioning_right_arm"' in right_header and "    5," in right_header,
+            "right-arm header did not mark 5-joint commissioning_right_arm mode")
+    require('{"arm_positive_x", "right_hand", 5, 12, 0, 135, 1, -5.0, 5.0, 130, 140, 1.0}' in right_header,
+            "right-arm header did not bind arm_positive_x to right_hand slot5 GPIO12")
+    require("LiveKey-20260906-Q4bz!" not in right_header,
+            "right-arm header leaked plaintext access_key")
+
     bad_commissioning_range = json.loads(json.dumps(commissioning))
     bad_commissioning_range["joints"][0]["max"] = 2
     bad_commissioning_range["joints"][0]["servo_max_degrees"] = 92
-    try:
-        validate_profile(bad_commissioning_range)
-    except ProfileError as exc:
-        require("commissioning limits" in str(exc),
-                f"commissioning range negative test named wrong error: {exc}")
-    else:
-        raise ProfileError("commissioning range negative test was accepted")
+    expect_rejection(bad_commissioning_range, "commissioning limits")
 
     bad_commissioning_speed = json.loads(json.dumps(commissioning))
     bad_commissioning_speed["joints"][0]["max_speed_dps"] = 2
-    try:
-        validate_profile(bad_commissioning_speed)
-    except ProfileError as exc:
-        require("commissioning max_speed_dps" in str(exc),
-                f"commissioning speed negative test named wrong error: {exc}")
-    else:
-        raise ProfileError("commissioning speed negative test was accepted")
+    expect_rejection(bad_commissioning_speed, "commissioning max_speed_dps")
 
-    bad = dict(sample)
-    bad["joints"] = list(sample["joints"])
-    bad["joints"][0] = dict(bad["joints"][0], pin=8)
-    try:
-        validate_profile(bad)
-    except ProfileError as exc:
-        require("pin" in str(exc), f"pin negative test named wrong error: {exc}")
-    else:
-        raise ProfileError("pin negative test was accepted")
+    bad_old_fifth = json.loads(json.dumps(commissioning))
+    bad_old_fifth["joints"].append(dict(right_arm["joints"][-1]))
+    expect_rejection(bad_old_fifth, "exactly 4")
 
-    bad_id = dict(sample)
+    bad_right_six = json.loads(json.dumps(right_arm))
+    bad_right_six["joints"].append(dict(right_arm["joints"][-1], id="arm_negative_x"))
+    expect_rejection(bad_right_six, "exactly 5")
+
+    bad_right_slot = json.loads(json.dumps(right_arm))
+    bad_right_slot["joints"][-1]["servo_index"] = 4
+    expect_rejection(bad_right_slot, "servo_index")
+
+    bad_right_pin = json.loads(json.dumps(right_arm))
+    bad_right_pin["joints"][-1]["pin"] = 8
+    expect_rejection(bad_right_pin, "pin")
+
+    bad_left_arm = json.loads(json.dumps(right_arm))
+    bad_left_arm["joints"][-1]["servo_key"] = "left_hand"
+    bad_left_arm["joints"][-1]["servo_index"] = 4
+    bad_left_arm["joints"][-1]["pin"] = 8
+    bad_left_arm["joints"][-1]["neutral_degrees"] = 45
+    expect_rejection(bad_left_arm, "left_hand")
+
+    bad_right_direction = json.loads(json.dumps(right_arm))
+    bad_right_direction["joints"][-1]["direction"] = -1
+    expect_rejection(bad_right_direction, "direction +1")
+
+    bad_right_range = json.loads(json.dumps(right_arm))
+    bad_right_range["joints"][-1]["min"] = -10
+    bad_right_range["joints"][-1]["max"] = 10
+    bad_right_range["joints"][-1]["servo_min_degrees"] = 125
+    bad_right_range["joints"][-1]["servo_max_degrees"] = 145
+    expect_rejection(bad_right_range, "commissioning limits")
+
+    bad_right_speed = json.loads(json.dumps(right_arm))
+    bad_right_speed["joints"][-1]["max_speed_dps"] = 2
+    expect_rejection(bad_right_speed, "commissioning max_speed_dps")
+
+    bad_id = json.loads(json.dumps(verified))
     bad_id["calibration_id"] = "b" * 64
-    try:
-        validate_profile(bad_id)
-    except ProfileError as exc:
-        require("computed" in str(exc), f"calibration id negative test named wrong error: {exc}")
-    else:
-        raise ProfileError("calibration id negative test was accepted")
+    expect_rejection(bad_id, "computed")
 
 
 def main() -> int:

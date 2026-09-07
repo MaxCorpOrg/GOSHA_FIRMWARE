@@ -18,6 +18,8 @@ constexpr int kLegAndFootServoCount = RIGHT_FOOT + 1;
 Otto::Otto() {
     is_otto_resting_ = false;
     has_hands_ = false;
+    has_left_hand_ = false;
+    has_right_hand_ = false;
     // 初始化所有舵机管脚为-1（未连接）
     for (int i = 0; i < SERVO_COUNT; i++) {
         servo_pins_[i] = -1;
@@ -42,8 +44,11 @@ void Otto::Init(int left_leg, int right_leg, int left_foot, int right_foot, int 
     servo_pins_[LEFT_HAND] = left_hand;
     servo_pins_[RIGHT_HAND] = right_hand;
 
-    // 检查是否有手部舵机
-    has_hands_ = (left_hand != -1 && right_hand != -1);
+    // 检查是否有手部舵机。单独保存左右状态，避免右手单独接入时
+    // 被旧的 "оба канала рук или ничего" проверкой.
+    has_left_hand_ = left_hand != -1;
+    has_right_hand_ = right_hand != -1;
+    has_hands_ = has_left_hand_ && has_right_hand_;
 
     if (attach_servos) {
         AttachServos();
@@ -58,6 +63,14 @@ void Otto::Init(int left_leg, int right_leg, int left_foot, int right_foot, int 
 ///////////////////////////////////////////////////////////////////
 void Otto::AttachServos() {
     for (int i = 0; i < SERVO_COUNT; i++) {
+        if (servo_pins_[i] != -1) {
+            servo_[i].Attach(servo_pins_[i]);
+        }
+    }
+}
+
+void Otto::AttachLegsFeetServos() {
+    for (int i = 0; i < kLegAndFootServoCount; i++) {
         if (servo_pins_[i] != -1) {
             servo_[i].Attach(servo_pins_[i]);
         }
@@ -82,8 +95,10 @@ void Otto::SetTrims(int left_leg, int right_leg, int left_foot, int right_foot, 
     servo_trim_[LEFT_FOOT] = left_foot;
     servo_trim_[RIGHT_FOOT] = right_foot;
 
-    if (has_hands_) {
+    if (has_left_hand_) {
         servo_trim_[LEFT_HAND] = left_hand;
+    }
+    if (has_right_hand_) {
         servo_trim_[RIGHT_HAND] = right_hand;
     }
 
@@ -184,6 +199,49 @@ bool Otto::ApplyLegsFeetPositions(int left_leg, int right_leg, int left_foot, in
 
     for (int i = 0; i < kLegAndFootServoCount; i++) {
         servo_[i].SetPosition(target[i]);
+    }
+
+    return true;
+}
+
+bool Otto::AttachRightHandAtHome(int home_degrees) {
+    if (servo_pins_[LEFT_HAND] != -1 ||
+        servo_pins_[RIGHT_HAND] == -1 ||
+        home_degrees < 0 ||
+        home_degrees > 180) {
+        return false;
+    }
+
+    servo_[RIGHT_HAND].Attach(servo_pins_[RIGHT_HAND]);
+    servo_[RIGHT_HAND].SetTrim(servo_trim_[RIGHT_HAND]);
+    servo_[RIGHT_HAND].SetPosition(home_degrees);
+    is_otto_resting_ = false;
+    return true;
+}
+
+bool Otto::ApplyLiveServoPositions(const int servo_target[SERVO_COUNT]) {
+    if (servo_target == nullptr || servo_pins_[LEFT_HAND] != -1) {
+        return false;
+    }
+    for (int i = 0; i < kLegAndFootServoCount; i++) {
+        if (servo_pins_[i] == -1 || servo_target[i] < 0 || servo_target[i] > 180) {
+            return false;
+        }
+    }
+    if (servo_pins_[RIGHT_HAND] != -1 &&
+        (servo_target[RIGHT_HAND] < 0 || servo_target[RIGHT_HAND] > 180)) {
+        return false;
+    }
+
+    if (GetRestState() == true) {
+        SetRestState(false);
+    }
+
+    for (int i = 0; i < kLegAndFootServoCount; i++) {
+        servo_[i].SetPosition(servo_target[i]);
+    }
+    if (servo_pins_[RIGHT_HAND] != -1) {
+        servo_[RIGHT_HAND].SetPosition(servo_target[RIGHT_HAND]);
     }
 
     return true;

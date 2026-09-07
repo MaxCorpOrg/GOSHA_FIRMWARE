@@ -145,13 +145,15 @@ MotionLiveAdapter::MotionLiveAdapter() {
 }
 
 void MotionLiveAdapter::ConfigureRuntime(const MotionLiveRuntimeConfig& runtime,
-                                         MotionLiveHardwareApplier applier) {
+                                         MotionLiveHardwareApplier applier,
+                                         MotionLiveRightArmInitializer right_arm_initializer) {
     MotionLiveRuntimeConfig checked_runtime = runtime;
     checked_runtime.watchdog_tick_ready = EnsureWatchdogTimerStarted();
     {
         std::lock_guard<std::mutex> lock(mutex_);
         core_.SetRuntimeConfig(checked_runtime);
         core_.SetHardwareApplier(std::move(applier));
+        core_.SetRightArmInitializer(std::move(right_arm_initializer));
     }
 }
 
@@ -303,10 +305,17 @@ esp_err_t MotionLiveAdapter::SendCapabilities(httpd_req_t* req, cJSON* request,
     cJSON_AddNumberToObject(reply, "watchdog_ms", caps.watchdog_ms);
     cJSON_AddNumberToObject(reply, "max_rate_hz", caps.max_rate_hz);
     cJSON_AddBoolToObject(reply, "auth_required", caps.auth_required);
+    cJSON_AddBoolToObject(reply, "initialization_required", caps.initialization_required);
+    cJSON_AddBoolToObject(reply, "right_arm_available", caps.right_arm_available);
+    cJSON_AddBoolToObject(reply, "right_arm_initialized", caps.right_arm_initialized);
+    if (caps.initialization_op != nullptr && caps.initialization_op[0] != '\0') {
+        cJSON_AddStringToObject(reply, "initialization_op", caps.initialization_op);
+    }
 
     cJSON* limits = cJSON_CreateArray();
-    if (limits != nullptr && caps.motion_allowed) {
-        for (const auto& limit : caps.joint_limits) {
+    if (limits != nullptr) {
+        for (int i = 0; i < caps.joint_limit_count; ++i) {
+            const auto& limit = caps.joint_limits[i];
             cJSON* item = cJSON_CreateObject();
             if (item == nullptr) {
                 continue;
@@ -412,6 +421,35 @@ bool MotionLiveAdapter::HandleWebSocketMessage(httpd_req_t* req, cJSON* root) {
             caps = core_.GetCapabilities();
         }
         SendCapabilities(req, root, caps);
+        return true;
+    }
+
+    if (std::strcmp(op, "initialize_right_arm") == 0) {
+        std::string request_id;
+        std::string calibration_id;
+        if (!ReadString(root, "request_id", &request_id) ||
+            !ReadString(root, "calibration_id", &calibration_id)) {
+            SendError(req, root, "bad_json",
+                      "Live initialize_right_arm requires request_id and calibration_id");
+            return true;
+        }
+        cJSON* key = cJSON_GetObjectItem(root, "access_key");
+        const bool access_ok =
+            cJSON_IsString(key) && key->valuestring != nullptr && AccessKeyMatches(key->valuestring);
+        MotionLiveResult result;
+        MotionLiveCapabilities caps;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            result = core_.InitializeRightArm(owner_socket, calibration_id, access_ok);
+            if (result.ok) {
+                caps = core_.GetCapabilities();
+            }
+        }
+        if (result.ok) {
+            SendCapabilities(req, root, caps);
+        } else {
+            SendError(req, root, result.code, result.message);
+        }
         return true;
     }
 

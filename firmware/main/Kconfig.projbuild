@@ -538,6 +538,23 @@ config GOSHA_MOTION_LIVE_LOCAL_OPT_IN
         assets writes. Leave this disabled unless the owner has completed the
         mechanical admission for the four lower-body channels.
 
+config GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN
+    bool "GOSHA v1 local owner Live right-arm commissioning"
+    depends on BOARD_TYPE_GOSHA_V1
+    depends on GOSHA_NO_MOTION_SAFE_PROFILE
+    depends on GOSHA_SAFE_NEUTRAL_BOOT_PROFILE
+    depends on GOSHA_MOTION_LIVE_LOCAL_OPT_IN
+    default n
+    help
+        Adds the separate commissioning_right_arm Live profile admission for
+        the physically confirmed right hand servo on GPIO12 in non-camera
+        maintenance builds. The channel is only prepared at boot: PWM is not
+        started until an authenticated initialize_right_arm request attaches
+        the right hand and holds the legacy down/home angle of 135 degrees.
+        The left hand remains unavailable, and the legacy MCP motion tools,
+        Home, trim, servo sequences, OTA, reboot and assets writes remain
+        closed by the required no-motion/safe-neutral profiles.
+
 choice
     depends on BOARD_TYPE_LILYGO_T_DISPLAY_P4
     prompt "Select the screen type"

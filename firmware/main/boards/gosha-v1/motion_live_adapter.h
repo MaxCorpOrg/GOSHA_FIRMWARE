@@ -16,7 +16,8 @@ public:
     static MotionLiveAdapter& GetInstance();
 
     void ConfigureRuntime(const MotionLiveRuntimeConfig& runtime,
-                          MotionLiveHardwareApplier applier);
+                          MotionLiveHardwareApplier applier,
+                          MotionLiveRightArmInitializer right_arm_initializer);
     bool HandleWebSocketMessage(httpd_req_t* req, cJSON* root);
     void OnSocketClosed(int socket_fd);
 

@@ -40,6 +40,17 @@ constexpr bool kSafeNeutralBootProfile = true;
 constexpr bool kSafeNeutralBootProfile = false;
 #endif
 
+#if defined(CONFIG_GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN) && \
+    !defined(CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN)
+#error "CONFIG_GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN requires CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN"
+#endif
+
+#ifdef CONFIG_GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN
+constexpr bool kMotionLiveRightArmLocalOptIn = true;
+#else
+constexpr bool kMotionLiveRightArmLocalOptIn = false;
+#endif
+
 }  // namespace
 
 class OttoController {
@@ -48,7 +59,10 @@ private:
     TaskHandle_t action_task_handle_ = nullptr;
     QueueHandle_t action_queue_;
     bool has_hands_ = false;
+    bool has_left_hand_ = false;
+    bool has_right_hand_ = false;
     bool has_complete_legs_feet_ = false;
+    bool right_arm_live_enabled_ = false;
     bool is_action_in_progress_ = false;
     bool safe_neutral_boot_done_ = false;
     bool safe_neutral_hold_commanded_ = false;
@@ -552,6 +566,7 @@ private:
 
         is_action_in_progress_ = true;
         PowerManager::PauseBatteryUpdate();
+        otto_.AttachLegsFeetServos();
         otto_.HoldLegsFeetAtNeutral();
         PowerManager::ResumeBatteryUpdate();
         is_action_in_progress_ = false;
@@ -562,56 +577,81 @@ private:
 
     void ConfigureMotionLiveAdapter(const HardwareConfig& hw_config,
                                     gpio_num_t left_hand_pin,
-                                    gpio_num_t right_hand_pin,
-                                    bool attach_servos) {
+                                    gpio_num_t right_hand_pin) {
         gosha::motion_live::MotionLiveRuntimeConfig runtime;
         runtime.board_is_gosha_v1 = true;
         runtime.no_motion_safe_profile = kNoMotionSafeProfile;
         runtime.safe_neutral_boot_profile = kSafeNeutralBootProfile;
         runtime.safe_neutral_commanded = safe_neutral_hold_commanded_;
-        runtime.lower_body_attached = attach_servos && has_complete_legs_feet_;
+        runtime.lower_body_attached = safe_neutral_hold_commanded_ && has_complete_legs_feet_;
 
         runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kLeftLeg)] =
             {static_cast<int>(hw_config.left_leg_pin), trim_left_leg_, 90,
-             attach_servos && hw_config.left_leg_pin != GPIO_NUM_NC};
+             runtime.lower_body_attached && hw_config.left_leg_pin != GPIO_NUM_NC};
         runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kRightLeg)] =
             {static_cast<int>(hw_config.right_leg_pin), trim_right_leg_, 90,
-             attach_servos && hw_config.right_leg_pin != GPIO_NUM_NC};
+             runtime.lower_body_attached && hw_config.right_leg_pin != GPIO_NUM_NC};
         runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kLeftFoot)] =
             {static_cast<int>(hw_config.left_foot_pin), trim_left_foot_, 90,
-             attach_servos && hw_config.left_foot_pin != GPIO_NUM_NC};
+             runtime.lower_body_attached && hw_config.left_foot_pin != GPIO_NUM_NC};
         runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kRightFoot)] =
             {static_cast<int>(hw_config.right_foot_pin), trim_right_foot_, 90,
-             attach_servos && hw_config.right_foot_pin != GPIO_NUM_NC};
+             runtime.lower_body_attached && hw_config.right_foot_pin != GPIO_NUM_NC};
         runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kLeftHand)] =
-            {static_cast<int>(left_hand_pin), trim_left_hand_, 90, false};
+            {static_cast<int>(left_hand_pin), trim_left_hand_, 45, false};
         runtime.joints[static_cast<int>(gosha::motion_live::ServoSlot::kRightHand)] =
-            {static_cast<int>(right_hand_pin), trim_right_hand_, 90, false};
+            {static_cast<int>(right_hand_pin), trim_right_hand_,
+             gosha::motion_live::kRightArmHomeDegrees, false};
 
-        auto applier = [this](const std::array<int, gosha::motion_live::kActiveJointCount>& target) {
-            return otto_.ApplyLegsFeetPositions(target[0], target[1], target[2], target[3]);
+        auto applier = [this](const std::array<int, gosha::motion_live::kPoseJointCount>& target) {
+            int servo_target[SERVO_COUNT] = {
+                target[static_cast<int>(gosha::motion_live::ServoSlot::kLeftLeg)],
+                target[static_cast<int>(gosha::motion_live::ServoSlot::kRightLeg)],
+                target[static_cast<int>(gosha::motion_live::ServoSlot::kLeftFoot)],
+                target[static_cast<int>(gosha::motion_live::ServoSlot::kRightFoot)],
+                target[static_cast<int>(gosha::motion_live::ServoSlot::kLeftHand)],
+                target[static_cast<int>(gosha::motion_live::ServoSlot::kRightHand)],
+            };
+            return otto_.ApplyLiveServoPositions(servo_target);
         };
-        gosha::motion_live::MotionLiveAdapter::GetInstance().ConfigureRuntime(runtime, applier);
+        auto right_arm_initializer = [this](int home_degrees) {
+            return otto_.AttachRightHandAtHome(home_degrees);
+        };
+        gosha::motion_live::MotionLiveAdapter::GetInstance().ConfigureRuntime(
+            runtime, applier, right_arm_initializer);
     }
 
 public:
     OttoController(const HardwareConfig& hw_config) {
+        const bool right_arm_live_pinset =
+            kSafeNeutralBootProfile &&
+            kMotionLiveRightArmLocalOptIn &&
+            hw_config.left_hand_pin == GPIO_NUM_NC &&
+            hw_config.right_hand_pin == GPIO_NUM_12;
         const gpio_num_t left_hand_pin =
             kSafeNeutralBootProfile ? GPIO_NUM_NC : hw_config.left_hand_pin;
         const gpio_num_t right_hand_pin =
-            kSafeNeutralBootProfile ? GPIO_NUM_NC : hw_config.right_hand_pin;
-        const bool safe_neutral_pinset =
+            kSafeNeutralBootProfile
+                ? (right_arm_live_pinset ? hw_config.right_hand_pin : GPIO_NUM_NC)
+                : hw_config.right_hand_pin;
+        const bool safe_neutral_lower_body_pinset =
             hw_config.left_leg_pin != GPIO_NUM_NC &&
             hw_config.right_leg_pin != GPIO_NUM_NC &&
             hw_config.left_foot_pin != GPIO_NUM_NC &&
-            hw_config.right_foot_pin != GPIO_NUM_NC &&
+            hw_config.right_foot_pin != GPIO_NUM_NC;
+        const bool safe_neutral_pinset =
+            safe_neutral_lower_body_pinset &&
             left_hand_pin == GPIO_NUM_NC &&
-            right_hand_pin == GPIO_NUM_NC;
-        const bool attach_servos =
-            !kNoMotionSafeProfile || (kSafeNeutralBootProfile && safe_neutral_pinset);
+            (right_arm_live_pinset ? right_hand_pin == GPIO_NUM_12
+                                   : right_hand_pin == GPIO_NUM_NC);
+        const bool attach_servos = !kNoMotionSafeProfile;
 
         if (kSafeNeutralBootProfile) {
-            ESP_LOGW(TAG, "Maintenance safe-neutral boot: каналы рук программно отключены как GPIO_NUM_NC, PWM на руки не подаётся");
+            if (right_arm_live_pinset) {
+                ESP_LOGW(TAG, "Maintenance safe-neutral boot: левая рука GPIO_NUM_NC, правая рука подготовлена на GPIO12 без boot PWM");
+            } else {
+                ESP_LOGW(TAG, "Maintenance safe-neutral boot: каналы рук программно отключены как GPIO_NUM_NC, PWM на руки не подаётся");
+            }
         }
 
         otto_.Init(
@@ -624,8 +664,11 @@ public:
             attach_servos
         );
 
-        has_hands_ = (left_hand_pin != GPIO_NUM_NC && right_hand_pin != GPIO_NUM_NC);
+        has_left_hand_ = left_hand_pin != GPIO_NUM_NC;
+        has_right_hand_ = right_hand_pin != GPIO_NUM_NC;
+        has_hands_ = has_left_hand_ && has_right_hand_;
         has_complete_legs_feet_ = safe_neutral_pinset;
+        right_arm_live_enabled_ = right_arm_live_pinset;
         ESP_LOGI(TAG, "Инициализация Otto: %s сервоприводы рук", has_hands_ ? "есть" : "нет");
         ESP_LOGI(TAG, "Конфигурация выводов сервоприводов: LL=%d, RL=%d, LF=%d, RF=%d, LH=%d, RH=%d",
                  hw_config.left_leg_pin, hw_config.right_leg_pin,
@@ -635,7 +678,7 @@ public:
         LoadTrimsFromNVS();
 
         PerformSafeNeutralBootOnce();
-        ConfigureMotionLiveAdapter(hw_config, left_hand_pin, right_hand_pin, attach_servos);
+        ConfigureMotionLiveAdapter(hw_config, left_hand_pin, right_hand_pin);
 
         action_queue_ = xQueueCreate(10, sizeof(OttoActionParams));
 
@@ -887,14 +930,14 @@ hands_up, hands_down, hand_wave, windmill, takeoff, fitness, greeting, shy, radi
                     right_foot = trim_value;
                     settings.SetInt("right_foot", right_foot);
                 } else if (servo_type == "left_hand") {
-                    if (!has_hands_) {
-                        return "Ошибка: у робота не настроены сервоприводы рук";
+                    if (!has_left_hand_) {
+                        return "Ошибка: у робота не настроен сервопривод левой руки";
                     }
                     left_hand = trim_value;
                     settings.SetInt("left_hand", left_hand);
                 } else if (servo_type == "right_hand") {
-                    if (!has_hands_) {
-                        return "Ошибка: у робота не настроены сервоприводы рук";
+                    if (!has_right_hand_) {
+                        return "Ошибка: у робота не настроен сервопривод правой руки";
                     }
                     right_hand = trim_value;
                     settings.SetInt("right_hand", right_hand);

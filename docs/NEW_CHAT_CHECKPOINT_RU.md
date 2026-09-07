@@ -1,5 +1,71 @@
 # NEW CHAT CHECKPOINT
 
+## Motion Live правой руки — 2026-09-07
+
+В worktree `firmware-motion-live` подготовлена отдельная разновидность
+`mode=commissioning_right_arm`. Она не расширяет исторический
+`mode=commissioning`: старый commissioning остаётся четырьмя каналами
+ног/ступней с пределами ±1°, `verified` сохраняет прежнюю семантику
+`calibrated=true`.
+
+Новый профиль содержит пять активных суставов: четыре ноги/ступни с
+пределами ±1° и `arm_positive_x -> right_hand`, физический slot `5`,
+GPIO12, `neutral_degrees=135`, `direction=+1`, servo range `130..140`,
+relative range ±5°, `max_speed_dps=1`. Левый `arm_negative_x` и servo slot
+`4` (`left_hand`, GPIO8) недоступны и отдельно отвергаются, чтобы хранилище
+servo slots не смешивало правую руку со старым индексом левой руки.
+`calibration_id` вычисляется заново из `mode` и всех пяти joint bindings;
+owner-local pending profile root уже провалидировал как
+`6eaa6dcb3f22f05c55ed1f3c6890b4f670c0921bb4380f9641e74aabc809f3bc`.
+Plaintext access key остаётся только в ignored owner-local JSON и не пишется
+в generated header.
+
+Правый канал включается отдельным compile opt-in
+`CONFIG_GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN`, по умолчанию `n`; он
+зависит от `CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN`, no-motion и
+safe-neutral. Проверенная `config.json` release matrix не включает этот флаг
+по умолчанию. Camera-вариант остаётся fail-closed: все servo pins маскируются
+в `GPIO_NUM_NC`; GPIO12 правой руки передаётся только в non-camera branch.
+
+Boot safe-neutral теперь attach'ит и удерживает только четыре канала
+ног/ступней на 90°. Правый PWM не стартует на boot и не стартует от
+`hello`, `arm`, `pose` до инициализации, `keepalive` или STOP. Перед
+обычной Live-сессией нужен отдельный authenticated `initialize_right_arm` с
+`request_id`, `calibration_id` и `access_key`; он сериализован тем же mutex,
+запрещён при активной сессии, exact-once вызывает callback
+`AttachRightHandAtHome(135)` и в случае успеха возвращает `capabilities` с тем
+же `request_id`, `right_arm_initialized=true`, `motion_allowed=true`. До этого
+`capabilities` сообщает `initialization_required=true`,
+`right_arm_available=true`, `right_arm_initialized=false`,
+`motion_allowed=false`, `reason=right_arm_initialization_required`. Ошибка
+инициализации latch'ится как `right_arm_initialization_failed` без autoretry.
+
+После успешного hold 135° движение остаётся session-gated и продвигается
+только явными `pose` кадрами оператора: один владелец socket, строгий seq,
+watchdog 300 мс, а `keepalive` и timer tick в этом режиме сами не меняют PWM.
+STOP удерживает последнюю программную команду без Home/detach. В
+`commissioning_right_arm` за сессию можно менять
+только один физический канал; для ног/ступней отклонение от session baseline
+≤1°, для правой руки ≤5°. `relative=-5` на `arm_positive_x` соответствует
+servo `130` от rightHome135; это commanded setpoint, не измеренный угол.
+`measured_pose` и `tilt` остаются `null`, `feedback.measured_position=false`,
+`feedback.imu=false`; фактическое движение и калибровка аппаратно не
+подтверждены. Все старые запреты MCP/Home/trim/sequence/OTA/reboot/assets
+сохранены.
+
+Локальные проверки без устройства: `motion_live_core_host_test` обычный,
+тот же host test с `-Wall -Wextra -Werror -fsanitize=address,undefined`,
+`prepare_live_profile.py --self-test`,
+`check_gosha_v1_no_motion_profile.py --self-test`,
+`check_gosha_v1_safe_neutral_boot_profile.py --self-test`,
+`check_gosha_v1_motion_live_profile.py --self-test`, `py_compile` обновлённых
+Python guards/generator, `git diff --check`, `scripts/release.py --list-boards --json`
+с подтверждёнными `gosha-v1` и `gosha-v1-safe-neutral-boot`, а также
+компиляция синтетического generated `commissioning_right_arm` header — PASS.
+ESP-IDF build, serial, flash, reboot, network
+и аппаратные команды этим агентом не выполнялись; свежий NVS backup и сборка
+с right-arm opt-in остаются за root после source freeze.
+
 ## Аппаратный тест Live и исправление Wi-Fi — 2026-09-06
 
 Владелец подтвердил питание от аккумулятора, USB, опору корпуса и возможность

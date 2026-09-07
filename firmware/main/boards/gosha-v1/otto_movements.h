@@ -48,8 +48,11 @@ public:
 
     //-- Predetermined Motion Functions
     void MoveServos(int time, int servo_target[]);
+    void AttachLegsFeetServos();
     void HoldLegsFeetAtNeutral();
     bool ApplyLegsFeetPositions(int left_leg, int right_leg, int left_foot, int right_foot);
+    bool AttachRightHandAtHome(int home_degrees);
+    bool ApplyLiveServoPositions(const int servo_target[SERVO_COUNT]);
     void MoveSingle(int position, int servo_number);
     void OscillateServos(int amplitude[SERVO_COUNT], int offset[SERVO_COUNT], int period,
                          double phase_diff[SERVO_COUNT], float cycle);
@@ -110,6 +113,8 @@ private:
 
     bool is_otto_resting_;
     bool has_hands_;  // 是否有手部舵机
+    bool has_left_hand_;
+    bool has_right_hand_;
 
     void Execute(int amplitude[SERVO_COUNT], int offset[SERVO_COUNT], int period,
                  double phase_diff[SERVO_COUNT], float steps);

@@ -1,5 +1,29 @@
 # GOSHA_FIRMWARE
 
+## Motion Live правой руки — 2026-09-07
+
+Исходники содержат отдельный source-only контракт для owner-local проверки
+правой руки в Motion Studio Live: `commissioning_right_arm` добавляет к четырём
+каналам ног/ступней правый `arm_positive_x -> right_hand` на slot5/GPIO12 с
+rightHome135, direction +1, пределом ±5° и max speed 1°/с. Старые `verified` и
+`commissioning` остаются четырёхсуставными.
+
+Флаг `CONFIG_GOSHA_MOTION_LIVE_RIGHT_ARM_LOCAL_OPT_IN` выключен по умолчанию и
+зависит от Live + no-motion + safe-neutral. На boot правая рука только
+подготовлена; PWM на неё не подаётся до явного authenticated
+`initialize_right_arm`, который один раз attach'ит и удерживает 135°.
+`hello`, `ARM`, `keepalive`, timer tick и STOP не двигают правую руку;
+последующий шаг идёт только через явные `pose` кадры. Левый slot4/GPIO8
+остаётся недоступен. Команды сообщают только программный `commanded_pose`;
+измеренного угла нет.
+
+Проверено локально без устройства: host core test обычный и ASan/UBSan,
+генератор профиля, no-motion/safe-neutral/Motion Live static guards,
+`py_compile`, `git diff --check`, `scripts/release.py --list-boards --json` и
+компиляция синтетического generated `commissioning_right_arm` header.
+ESP build/flash/reboot/serial не
+выполнялись в этом worktree.
+
 `GOSHA_FIRMWARE` — отдельный репозиторий собственной прошивки проекта `Гоша`.
 
 ## Назначение
