@@ -1,5 +1,34 @@
 # NEW CHAT CHECKPOINT
 
+## Motion editor full-range source candidate — 2026-09-08
+
+Статус: source candidate, готово, не установлено. По новой задаче владельца
+подготовлен контракт полного Live-редактора движений без one-joint commissioning
+lock: новый mode `motion_editor`, `commissioning=false`, `calibrated=false`,
+owner-defined profile, одна authenticated session для всех доступных суставов.
+Сейчас доступны 5 суставов: ноги `[-35,+35]`, стопы `[-30,+30]`, правая рука
+`arm_positive_x -> right_hand`; `arm_negative_x`/`left_hand` остаются NC и не
+попадают в profile/caps. Speed в editor валидируется как `1..10°/с`; UI default
+`5°/с` совместим. Старые modes `verified`, `commissioning` и
+`commissioning_right_arm` сохраняют прежний контракт.
+
+Зафиксирован физический конфликт полного 3D диапазона правой руки: при текущем
+production `neutral_degrees=135`, `direction=+1` запрос `[-70,+55]` даёт servo
+`65..190`, то есть `+55` выходит за PWM-servo contract `0..180`. Firmware не
+clamp'ит, не подменяет углы и не меняет production neutral. Full `[-70,+55]`
+может пройти только при явно заданной достижимой нейтрали/механической
+перестановке, например synthetic `neutral=125` даёт servo `55..180`. Более узкий
+правый range внутри envelope `[-70,+55]` допустим только как явный owner/mechanical
+profile; тогда `joint_limits` в caps показывают фактический range, а не 3D-желание.
+
+Для `motion_editor` `keepalive` и timer `Tick` не двигают приводы и не вызывают
+`StepTowardTarget`; они только обновляют motion clock, чтобы после idle не было
+накопленного `dt` и первого POSE-burst. Движение идёт только POSE stream.
+Explicit `initialize_right_arm`, access-key auth, watchdog 300 мс, STOP без
+Home/detach, no-motion/safe-neutral/OTA/reboot/assets gates сохраняются. ESP-IDF
+build, USB, robot network, reboot, flash, hardware команды и чтение owner-local
+profile key в этой source-фазе не выполнялись.
+
 ## Собранный кандидат, ожидает установки
 
 Из точного Firmwareddd9397 после source review PASS собран app3 644 160байт,

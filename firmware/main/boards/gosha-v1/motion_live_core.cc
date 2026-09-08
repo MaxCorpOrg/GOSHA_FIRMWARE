@@ -171,6 +171,31 @@ RightArmPreparedRange RightArmPreparedRangeFor(const MotionLiveJointProfile& joi
     return {0.0, 0.0, 0, 0, 0, false};
 }
 
+bool MotionEditorExpectedRange(int joint_index, double* min_relative, double* max_relative) {
+    if (min_relative == nullptr || max_relative == nullptr) {
+        return false;
+    }
+    switch (static_cast<JointIndex>(joint_index)) {
+        case JointIndex::kLegNegativeX:
+        case JointIndex::kLegPositiveX:
+            *min_relative = -35.0;
+            *max_relative = 35.0;
+            return true;
+        case JointIndex::kFootNegativeX:
+        case JointIndex::kFootPositiveX:
+            *min_relative = -30.0;
+            *max_relative = 30.0;
+            return true;
+        case JointIndex::kArmPositiveX:
+            *min_relative = -70.0;
+            *max_relative = 55.0;
+            return true;
+        case JointIndex::kArmNegativeX:
+            return false;
+    }
+    return false;
+}
+
 }  // namespace
 
 const std::array<JointSpec, kPoseJointCount> kJointSpecs = {{
@@ -235,19 +260,39 @@ bool MotionLiveCore::ProfileIsCommissioningRightArm() const {
     return profile_ != nullptr && Streq(profile_->mode, kProfileModeCommissioningRightArm);
 }
 
+bool MotionLiveCore::ProfileIsMotionEditor() const {
+    return profile_ != nullptr && Streq(profile_->mode, kProfileModeMotionEditor);
+}
+
 bool MotionLiveCore::ProfileRequiresSingleJointSession() const {
     return ProfileIsCommissioning() || ProfileIsCommissioningRightArm();
 }
 
 bool MotionLiveCore::ProfileNeedsRightArmInitialization() const {
-    return ProfileIsCommissioningRightArm();
+    return ProfileUsesRightArm();
+}
+
+bool MotionLiveCore::ProfileUsesRightArm() const {
+    return ProfileIsCommissioningRightArm() || ProfileIsMotionEditor();
+}
+
+bool MotionLiveCore::ProfileIsCalibrated() const {
+    return profile_ != nullptr && Streq(profile_->mode, kProfileModeVerified);
+}
+
+bool MotionLiveCore::ProfileStepsOnPassiveClock() const {
+    return !ProfileIsCommissioningRightArm() && !ProfileIsMotionEditor();
+}
+
+bool MotionLiveCore::ProfileResetsMotionClockOnPassiveClock() const {
+    return ProfileIsMotionEditor();
 }
 
 bool MotionLiveCore::IsJointActiveForProfile(int joint_index) const {
     if (joint_index < 0 || joint_index >= kPoseJointCount) {
         return false;
     }
-    if (ProfileIsCommissioningRightArm()) {
+    if (ProfileUsesRightArm()) {
         return joint_index == static_cast<int>(JointIndex::kLegNegativeX) ||
                joint_index == static_cast<int>(JointIndex::kLegPositiveX) ||
                joint_index == static_cast<int>(JointIndex::kFootNegativeX) ||
@@ -255,6 +300,15 @@ bool MotionLiveCore::IsJointActiveForProfile(int joint_index) const {
                joint_index == static_cast<int>(JointIndex::kArmPositiveX);
     }
     return kJointSpecs[joint_index].active;
+}
+
+int MotionLiveCore::RightArmProfileNeutralDegrees() const {
+    const int profile_index =
+        ActiveProfileIndexForJoint(static_cast<int>(JointIndex::kArmPositiveX));
+    if (profile_index < 0) {
+        return kRightArmHomeDegrees;
+    }
+    return profile_->joints[profile_index].neutral_degrees;
 }
 
 int MotionLiveCore::ProfileJointCount() const {
@@ -273,7 +327,8 @@ bool MotionLiveCore::ValidatePreparedProfile(const char** reason) const {
     if (!Streq(profile_->profile_id, kModelProfileId) ||
         !(Streq(profile_->mode, kProfileModeVerified) ||
           Streq(profile_->mode, kProfileModeCommissioning) ||
-          Streq(profile_->mode, kProfileModeCommissioningRightArm)) ||
+          Streq(profile_->mode, kProfileModeCommissioningRightArm) ||
+          Streq(profile_->mode, kProfileModeMotionEditor)) ||
         !IsHex64(profile_->calibration_id) ||
         !IsHex64(profile_->access_key_sha256) ||
         profile_->watchdog_ms != kWatchdogMs ||
@@ -285,8 +340,8 @@ bool MotionLiveCore::ValidatePreparedProfile(const char** reason) const {
     }
 
     const int joint_count = ProfileJointCount();
-    if ((ProfileIsCommissioningRightArm() && joint_count != kMaxActiveJointCount) ||
-        (!ProfileIsCommissioningRightArm() && joint_count != kActiveJointCount)) {
+    if ((ProfileUsesRightArm() && joint_count != kMaxActiveJointCount) ||
+        (!ProfileUsesRightArm() && joint_count != kActiveJointCount)) {
         *reason = kProfileMismatch;
         return false;
     }
@@ -308,13 +363,16 @@ bool MotionLiveCore::ValidatePreparedProfile(const char** reason) const {
             joint.servo_index != expected_servo_index ||
             !Streq(ServoGroupForKey(joint.servo_key), spec.servo_group) ||
             !IsServoSlotIndex(joint.servo_index) ||
-            (ProfileIsCommissioningRightArm()
+            (ProfileUsesRightArm()
                  ? !(IsLowerBodyServoIndex(joint.servo_index) ||
                      joint.servo_index == static_cast<int>(ServoSlot::kRightHand))
                  : !IsLowerBodyServoIndex(joint.servo_index)) ||
             seen_servos[joint.servo_index] ||
             joint.pin != ExpectedPinForServoIndex(joint.servo_index) ||
-            joint.neutral_degrees != ExpectedNeutralForServoIndex(joint.servo_index) ||
+            (!ProfileIsMotionEditor() &&
+             joint.neutral_degrees != ExpectedNeutralForServoIndex(joint.servo_index)) ||
+            (ProfileIsMotionEditor() &&
+             (joint.neutral_degrees < 0 || joint.neutral_degrees > 180)) ||
             (joint.direction != 1 && joint.direction != -1) ||
             !IsFinite(joint.min_relative_degrees) ||
             !IsFinite(joint.max_relative_degrees) ||
@@ -356,6 +414,37 @@ bool MotionLiveCore::ValidatePreparedProfile(const char** reason) const {
             }
         }
 
+        if (ProfileIsMotionEditor()) {
+            if (joint.max_speed_dps < 1.0 ||
+                joint.max_speed_dps > kMotionEditorMaxServoRateDps) {
+                *reason = kProfileMismatch;
+                return false;
+            }
+            double editor_min = 0.0;
+            double editor_max = 0.0;
+            if (!MotionEditorExpectedRange(joint_index, &editor_min, &editor_max)) {
+                *reason = kProfileMismatch;
+                return false;
+            }
+            const bool right_arm_joint =
+                joint_index == static_cast<int>(JointIndex::kArmPositiveX);
+            if (right_arm_joint) {
+                if (joint.direction != 1 ||
+                    joint.servo_index != static_cast<int>(ServoSlot::kRightHand) ||
+                    joint.min_relative_degrees < editor_min ||
+                    joint.min_relative_degrees >= 0.0 ||
+                    joint.max_relative_degrees <= 0.0 ||
+                    joint.max_relative_degrees > editor_max) {
+                    *reason = kProfileMismatch;
+                    return false;
+                }
+            } else if (joint.min_relative_degrees != editor_min ||
+                       joint.max_relative_degrees != editor_max) {
+                *reason = kProfileMismatch;
+                return false;
+            }
+        }
+
         const double servo_at_min =
             joint.neutral_degrees + joint.direction * joint.min_relative_degrees;
         const double servo_at_max =
@@ -384,7 +473,7 @@ bool MotionLiveCore::ValidatePreparedProfile(const char** reason) const {
         *reason = kProfileMismatch;
         return false;
     }
-    if (ProfileIsCommissioningRightArm()) {
+    if (ProfileUsesRightArm()) {
         if (!seen_servos[static_cast<int>(ServoSlot::kRightHand)] ||
             !seen_joints[static_cast<int>(JointIndex::kArmPositiveX)] ||
             seen_joints[static_cast<int>(JointIndex::kArmNegativeX)]) {
@@ -421,10 +510,14 @@ bool MotionLiveCore::ValidateRuntimeAgainstProfile(const char** reason) const {
         *reason = kRuntimeNotSafeNeutral;
         return false;
     }
-    if (ProfileIsCommissioningRightArm()) {
+    if (ProfileUsesRightArm()) {
+        const int right_arm_neutral = RightArmProfileNeutralDegrees();
         if (right_hand.pin != ExpectedPinForServoIndex(static_cast<int>(ServoSlot::kRightHand)) ||
-            right_hand.commanded_degrees != kRightArmHomeDegrees ||
             right_hand.attached != right_arm_initialized_) {
+            *reason = kRuntimeNotSafeNeutral;
+            return false;
+        }
+        if (right_arm_initialized_ && right_hand.commanded_degrees != right_arm_neutral) {
             *reason = kRuntimeNotSafeNeutral;
             return false;
         }
@@ -446,18 +539,23 @@ bool MotionLiveCore::ValidateRuntimeAgainstProfile(const char** reason) const {
         }
         const auto& runtime_joint = runtime_.joints[profile_joint.servo_index];
         if (runtime_joint.pin != profile_joint.pin ||
-            runtime_joint.trim != profile_joint.trim ||
-            runtime_joint.commanded_degrees != profile_joint.neutral_degrees) {
+            runtime_joint.trim != profile_joint.trim) {
             *reason = kRuntimeNotSafeNeutral;
             return false;
         }
         if (IsLowerBodyServoIndex(profile_joint.servo_index)) {
-            if (!runtime_joint.attached) {
+            if (!runtime_joint.attached ||
+                runtime_joint.commanded_degrees != profile_joint.neutral_degrees) {
                 *reason = kRuntimeNotSafeNeutral;
                 return false;
             }
         } else if (profile_joint.servo_index == static_cast<int>(ServoSlot::kRightHand)) {
             if (runtime_joint.attached != right_arm_initialized_) {
+                *reason = kRuntimeNotSafeNeutral;
+                return false;
+            }
+            if (right_arm_initialized_ &&
+                runtime_joint.commanded_degrees != profile_joint.neutral_degrees) {
                 *reason = kRuntimeNotSafeNeutral;
                 return false;
             }
@@ -508,13 +606,13 @@ MotionLiveCapabilities MotionLiveCore::GetCapabilities() const {
 
     const int joint_count = ProfileJointCount();
     caps.commissioning = ProfileRequiresSingleJointSession();
-    caps.calibrated = !caps.commissioning;
+    caps.calibrated = ProfileIsCalibrated();
     caps.mode = profile_->mode;
     caps.profile_id = profile_->profile_id;
     caps.calibration_id = profile_->calibration_id;
     caps.watchdog_ms = profile_->watchdog_ms;
     caps.max_rate_hz = profile_->max_rate_hz;
-    caps.right_arm_available = ProfileIsCommissioningRightArm();
+    caps.right_arm_available = ProfileUsesRightArm();
     caps.right_arm_initialized = right_arm_initialized_;
     caps.initialization_required =
         ProfileNeedsRightArmInitialization() && !right_arm_initialized_ &&
@@ -890,9 +988,9 @@ MotionLiveResult MotionLiveCore::InitializeRightArm(
     if (!ValidateBaseSafety(&reason)) {
         return MakeError(reason, "Right arm initialization is not enabled for this runtime/profile");
     }
-    if (!ProfileIsCommissioningRightArm()) {
+    if (!ProfileNeedsRightArmInitialization()) {
         return MakeError(kProfileMismatch,
-                         "Right arm initialization requires commissioning_right_arm mode");
+                         "Right arm initialization requires a right-arm Live mode");
     }
     if (request_calibration_id != profile_->calibration_id) {
         return MakeError(kProfileMismatch, "Calibration id does not match the prepared profile");
@@ -908,7 +1006,8 @@ MotionLiveResult MotionLiveCore::InitializeRightArm(
         return MakeAck(0, false);
     }
 
-    if (!InitializeRightArmHardware(kRightArmHomeDegrees)) {
+    const int right_arm_neutral = RightArmProfileNeutralDegrees();
+    if (!InitializeRightArmHardware(right_arm_neutral)) {
         right_arm_initialization_failed_ = true;
         return MakeError(kRightArmInitializationFailed,
                          "Right arm initialization callback failed");
@@ -917,9 +1016,9 @@ MotionLiveResult MotionLiveCore::InitializeRightArm(
     right_arm_initialized_ = true;
     runtime_.joints[static_cast<int>(ServoSlot::kRightHand)].attached = true;
     runtime_.joints[static_cast<int>(ServoSlot::kRightHand)].commanded_degrees =
-        kRightArmHomeDegrees;
+        right_arm_neutral;
     commanded_servo_degrees_[static_cast<int>(ServoSlot::kRightHand)] =
-        kRightArmHomeDegrees;
+        right_arm_neutral;
     commanded_pose_ = PoseFromServoDegrees(commanded_servo_degrees_);
     fractional_pose_ = commanded_pose_;
     target_pose_ = commanded_pose_;
@@ -1036,10 +1135,12 @@ MotionLiveResult MotionLiveCore::Keepalive(int owner_socket,
         return DisarmWithError(reason, "Sequence number is not the next command", true);
     }
     bool hardware_changed = false;
-    if (!ProfileIsCommissioningRightArm()) {
+    if (ProfileStepsOnPassiveClock()) {
         if (!StepTowardTarget(now_ms, &reason, &hardware_changed)) {
             return DisarmWithError(reason, "Live hardware apply callback failed", true);
         }
+    } else if (ProfileResetsMotionClockOnPassiveClock()) {
+        last_motion_step_ms_ = now_ms;
     }
     last_seq_ = seq;
     last_command_ms_ = now_ms;
@@ -1083,10 +1184,12 @@ MotionLiveResult MotionLiveCore::Tick(uint64_t now_ms) {
         now_ms - last_command_ms_ <= static_cast<uint64_t>(kWatchdogMs)) {
         const char* reason = nullptr;
         bool hardware_changed = false;
-        if (!ProfileIsCommissioningRightArm()) {
+        if (ProfileStepsOnPassiveClock()) {
             if (!StepTowardTarget(now_ms, &reason, &hardware_changed)) {
                 return DisarmWithError(reason, "Live hardware apply callback failed", true);
             }
+        } else if (ProfileResetsMotionClockOnPassiveClock()) {
+            last_motion_step_ms_ = now_ms;
         }
         MotionLiveResult result = MakeAck(last_seq_, hardware_changed);
         result.ok = false;

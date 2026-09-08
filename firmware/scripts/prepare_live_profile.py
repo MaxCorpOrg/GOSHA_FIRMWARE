@@ -19,10 +19,12 @@ PROFILE_ID = "gosha-preview-v1"
 PROFILE_MODE_VERIFIED = "verified"
 PROFILE_MODE_COMMISSIONING = "commissioning"
 PROFILE_MODE_COMMISSIONING_RIGHT_ARM = "commissioning_right_arm"
+PROFILE_MODE_MOTION_EDITOR = "motion_editor"
 WATCHDOG_MS = 300
 MIN_RATE_HZ = 5
 MAX_RATE_HZ = 20
 MAX_SPEED_DPS = 30
+MOTION_EDITOR_MAX_SPEED_DPS = 10.0
 COMMISSIONING_LIMIT_DEGREES = 1.0
 COMMISSIONING_MAX_SPEED_DPS = 1.0
 RIGHT_ARM_HOME_DEGREES = 135
@@ -52,6 +54,13 @@ RIGHT_ARM_ALLOWED_RANGES = (
         "session_delta": int(RIGHT_ARM_70_UP_LIMIT_DEGREES),
     },
 )
+MOTION_EDITOR_RANGES = {
+    "leg_negative_x": {"relative_min": -35.0, "relative_max": 35.0},
+    "leg_positive_x": {"relative_min": -35.0, "relative_max": 35.0},
+    "foot_negative_x": {"relative_min": -30.0, "relative_max": 30.0},
+    "foot_positive_x": {"relative_min": -30.0, "relative_max": 30.0},
+    "arm_positive_x": {"relative_min": -70.0, "relative_max": 55.0},
+}
 CALIBRATION_RE = re.compile(r"^[a-f0-9]{64}$")
 
 LOWER_BODY_JOINT_IDS = (
@@ -65,12 +74,14 @@ MODE_JOINT_IDS = {
     PROFILE_MODE_VERIFIED: set(LOWER_BODY_JOINT_IDS),
     PROFILE_MODE_COMMISSIONING: set(LOWER_BODY_JOINT_IDS),
     PROFILE_MODE_COMMISSIONING_RIGHT_ARM: set(RIGHT_ARM_JOINT_IDS),
+    PROFILE_MODE_MOTION_EDITOR: set(RIGHT_ARM_JOINT_IDS),
 }
 LOWER_BODY_SERVO_KEYS = {"left_leg", "right_leg", "left_foot", "right_foot"}
 MODE_SERVO_KEYS = {
     PROFILE_MODE_VERIFIED: LOWER_BODY_SERVO_KEYS,
     PROFILE_MODE_COMMISSIONING: LOWER_BODY_SERVO_KEYS,
     PROFILE_MODE_COMMISSIONING_RIGHT_ARM: LOWER_BODY_SERVO_KEYS | {"right_hand"},
+    PROFILE_MODE_MOTION_EDITOR: LOWER_BODY_SERVO_KEYS | {"right_hand"},
 }
 
 UI_JOINTS = {
@@ -166,6 +177,22 @@ def require_right_arm_commissioning_range(joint_id: str, relative_min: float,
     )
 
 
+def require_motion_editor_range(joint_id: str, relative_min: float, relative_max: float,
+                                max_speed: float) -> None:
+    editor_range = MOTION_EDITOR_RANGES[joint_id]
+    if joint_id == "arm_positive_x":
+        require(editor_range["relative_min"] <= relative_min < 0 < relative_max <=
+                editor_range["relative_max"],
+                f"{joint_id}: motion_editor right-arm range must stay within [-70,+55]")
+    else:
+        require(relative_min == editor_range["relative_min"] and
+                relative_max == editor_range["relative_max"],
+                f"{joint_id}: motion_editor limits must match the 3D range "
+                f"[{editor_range['relative_min']:+g},{editor_range['relative_max']:+g}] degrees")
+    require(MOTION_EDITOR_MAX_SPEED_DPS >= max_speed >= 1.0,
+            f"{joint_id}: motion_editor max_speed_dps must be within 1..10")
+
+
 def validate_joint(raw: Any, mode: str) -> dict[str, Any]:
     require(isinstance(raw, dict), "each joint entry must be an object")
     joint_id = raw.get("id")
@@ -184,8 +211,8 @@ def validate_joint(raw: Any, mode: str) -> dict[str, Any]:
     require(expected_servo["servo_group"] == expected_joint["servo_group"],
             f"{joint_id}: servo_key must stay within the {expected_joint['servo_group']} pair")
     if joint_id == "arm_positive_x":
-        require(mode == PROFILE_MODE_COMMISSIONING_RIGHT_ARM,
-                "arm_positive_x is available only in commissioning_right_arm")
+        require(mode in (PROFILE_MODE_COMMISSIONING_RIGHT_ARM, PROFILE_MODE_MOTION_EDITOR),
+                "arm_positive_x is available only in commissioning_right_arm or motion_editor")
         require(servo_key == "right_hand",
                 "arm_positive_x must bind to right_hand slot5 GPIO12")
     else:
@@ -202,8 +229,11 @@ def validate_joint(raw: Any, mode: str) -> dict[str, Any]:
     require(-50 <= trim <= 50, f"{joint_id}: trim must be within -50..50 degrees")
 
     neutral = as_int(raw.get("neutral_degrees"), f"{joint_id}.neutral_degrees")
-    require(neutral == expected_servo["neutral"],
-            f"{joint_id}: neutral_degrees must stay {expected_servo['neutral']} for the installed controller")
+    if mode == PROFILE_MODE_MOTION_EDITOR:
+        require(0 <= neutral <= 180, f"{joint_id}: neutral_degrees must stay inside servo 0..180")
+    else:
+        require(neutral == expected_servo["neutral"],
+                f"{joint_id}: neutral_degrees must stay {expected_servo['neutral']} for the installed controller")
 
     direction = as_int(raw.get("direction"), f"{joint_id}.direction")
     require(direction in (-1, 1), f"{joint_id}: direction must be -1 or 1")
@@ -239,6 +269,8 @@ def validate_joint(raw: Any, mode: str) -> dict[str, Any]:
         else:
             require_commissioning_limits(joint_id, relative_min, relative_max, max_speed,
                                          COMMISSIONING_LIMIT_DEGREES)
+    if mode == PROFILE_MODE_MOTION_EDITOR:
+        require_motion_editor_range(joint_id, relative_min, relative_max, max_speed)
 
     return {
         "id": joint_id,
@@ -261,7 +293,7 @@ def validate_profile(raw: Any) -> dict[str, Any]:
     require(raw.get("profile_id") == PROFILE_ID, f"profile_id must be {PROFILE_ID}")
     mode = raw.get("mode", PROFILE_MODE_VERIFIED)
     require(mode in MODE_JOINT_IDS,
-            "mode must be verified, commissioning or commissioning_right_arm")
+            "mode must be verified, commissioning, commissioning_right_arm or motion_editor")
     access_key = validate_access_key(raw.get("access_key"))
     watchdog_ms = as_int(raw.get("watchdog_ms", WATCHDOG_MS), "watchdog_ms")
     require(watchdog_ms == WATCHDOG_MS, "watchdog_ms must be exactly 300")
@@ -376,8 +408,16 @@ def load_json(path: Path) -> Any:
         return json.load(f)
 
 
+def servo_bounds_for(neutral: int, direction: int, relative_min: float,
+                     relative_max: float) -> tuple[int, int]:
+    servo_at_min = neutral + direction * relative_min
+    servo_at_max = neutral + direction * relative_max
+    return int(min(servo_at_min, servo_at_max)), int(max(servo_at_min, servo_at_max))
+
+
 def lower_body_sample(mode: str,
-                      right_arm_range: dict[str, Any] | None = None) -> dict[str, Any]:
+                      right_arm_range: dict[str, Any] | None = None,
+                      right_arm_neutral: int | None = None) -> dict[str, Any]:
     sample = {
         "profile_id": PROFILE_ID,
         "mode": mode,
@@ -406,6 +446,15 @@ def lower_body_sample(mode: str,
             joint["servo_min_degrees"] = 89
             joint["servo_max_degrees"] = 91
             joint["max_speed_dps"] = 1
+    if mode == PROFILE_MODE_MOTION_EDITOR:
+        for joint in sample["joints"]:
+            editor_range = MOTION_EDITOR_RANGES[joint["id"]]
+            joint["min"] = editor_range["relative_min"]
+            joint["max"] = editor_range["relative_max"]
+            joint["servo_min_degrees"], joint["servo_max_degrees"] = servo_bounds_for(
+                joint["neutral_degrees"], joint["direction"], joint["min"], joint["max"]
+            )
+            joint["max_speed_dps"] = 5
     if mode == PROFILE_MODE_COMMISSIONING_RIGHT_ARM:
         right_arm_range = right_arm_range or RIGHT_ARM_ALLOWED_RANGES[0]
         sample["joints"].append({
@@ -421,6 +470,26 @@ def lower_body_sample(mode: str,
             "servo_min_degrees": right_arm_range["servo_min"],
             "servo_max_degrees": right_arm_range["servo_max"],
             "max_speed_dps": 1,
+        })
+    if mode == PROFILE_MODE_MOTION_EDITOR:
+        editor_range = right_arm_range or MOTION_EDITOR_RANGES["arm_positive_x"]
+        neutral = right_arm_neutral if right_arm_neutral is not None else 125
+        servo_min, servo_max = servo_bounds_for(
+            neutral, 1, editor_range["relative_min"], editor_range["relative_max"]
+        )
+        sample["joints"].append({
+            "id": "arm_positive_x",
+            "servo_key": "right_hand",
+            "servo_index": 5,
+            "pin": 12,
+            "trim": 0,
+            "neutral_degrees": neutral,
+            "direction": 1,
+            "min": editor_range["relative_min"],
+            "max": editor_range["relative_max"],
+            "servo_min_degrees": servo_min,
+            "servo_max_degrees": servo_max,
+            "max_speed_dps": 5,
         })
     return sample
 
@@ -497,6 +566,39 @@ def run_self_test() -> None:
         "right-arm 70-up range must change the computed calibration_id")
     require("LiveKey-20260906-Q4bz!" not in right_70_up_header,
             "right-arm 70-up header leaked plaintext access_key")
+
+    motion_editor = lower_body_sample(PROFILE_MODE_MOTION_EDITOR, right_arm_neutral=125)
+    motion_editor_profile = validate_profile(motion_editor)
+    motion_editor_header = render_header(motion_editor_profile)
+    require(motion_editor_profile["mode"] == PROFILE_MODE_MOTION_EDITOR,
+            "motion_editor profile mode changed")
+    require(motion_editor_profile["calibration_id"] not in {
+        verified_profile["calibration_id"],
+        commissioning_profile["calibration_id"],
+        right_arm_profile["calibration_id"],
+        right_arm_15_profile["calibration_id"],
+        right_arm_70_up_profile["calibration_id"],
+    }, "motion_editor range must change the computed calibration_id")
+    require('"motion_editor"' in motion_editor_header and "    5," in motion_editor_header,
+            "motion_editor header did not mark 5-joint owner-defined mode")
+    require('{"leg_negative_x", "left_leg", 0, 17, 0, 90, 1, -35.0, 35.0, 55, 125, 5.0}' in motion_editor_header,
+            "motion_editor header did not preserve leg 3D range")
+    require('{"foot_positive_x", "right_foot", 3, 38, 0, 90, -1, -30.0, 30.0, 60, 120, 5.0}' in motion_editor_header,
+            "motion_editor header did not preserve foot 3D range")
+    require('{"arm_positive_x", "right_hand", 5, 12, 0, 125, 1, -70.0, 55.0, 55, 180, 5.0}' in motion_editor_header,
+            "motion_editor synthetic right arm did not map [-70,+55] into servo55..180")
+    require("LiveKey-20260906-Q4bz!" not in motion_editor_header,
+            "motion_editor header leaked plaintext access_key")
+
+    narrowed_motion_editor = lower_body_sample(
+        PROFILE_MODE_MOTION_EDITOR,
+        {"relative_min": -70.0, "relative_max": 45.0},
+        right_arm_neutral=RIGHT_ARM_HOME_DEGREES,
+    )
+    narrowed_motion_editor_profile = validate_profile(narrowed_motion_editor)
+    narrowed_motion_editor_header = render_header(narrowed_motion_editor_profile)
+    require('{"arm_positive_x", "right_hand", 5, 12, 0, 135, 1, -70.0, 45.0, 65, 180, 5.0}' in narrowed_motion_editor_header,
+            "motion_editor explicit narrowed right arm did not map neutral135 into servo65..180")
 
     bad_commissioning_range = json.loads(json.dumps(commissioning))
     bad_commissioning_range["joints"][0]["max"] = 2
@@ -575,6 +677,34 @@ def run_self_test() -> None:
     bad_right_70_bounds = json.loads(json.dumps(right_arm_70_up))
     bad_right_70_bounds["joints"][-1]["servo_min_degrees"] = 64
     expect_rejection(bad_right_70_bounds, "right-arm commissioning range")
+
+    bad_motion_editor_production_full = lower_body_sample(
+        PROFILE_MODE_MOTION_EDITOR, right_arm_neutral=RIGHT_ARM_HOME_DEGREES)
+    bad_motion_editor_production_full["joints"][-1]["servo_max_degrees"] = 180
+    expect_rejection(bad_motion_editor_production_full, "relative mapping leaves")
+
+    bad_motion_editor_leg_range = json.loads(json.dumps(motion_editor))
+    bad_motion_editor_leg_range["joints"][0]["max"] = 34
+    bad_motion_editor_leg_range["joints"][0]["servo_max_degrees"] = 124
+    expect_rejection(bad_motion_editor_leg_range, "motion_editor limits")
+
+    bad_motion_editor_right_down = lower_body_sample(PROFILE_MODE_MOTION_EDITOR, right_arm_neutral=124)
+    bad_motion_editor_right_down["joints"][-1]["max"] = 56
+    bad_motion_editor_right_down["joints"][-1]["servo_max_degrees"] = 180
+    expect_rejection(bad_motion_editor_right_down, "motion_editor right-arm range")
+
+    bad_motion_editor_right_up = json.loads(json.dumps(motion_editor))
+    bad_motion_editor_right_up["joints"][-1]["min"] = -71
+    bad_motion_editor_right_up["joints"][-1]["servo_min_degrees"] = 54
+    expect_rejection(bad_motion_editor_right_up, "relative limits")
+
+    bad_motion_editor_slow = json.loads(json.dumps(motion_editor))
+    bad_motion_editor_slow["joints"][-1]["max_speed_dps"] = 0.5
+    expect_rejection(bad_motion_editor_slow, "motion_editor max_speed_dps")
+
+    bad_motion_editor_fast = json.loads(json.dumps(motion_editor))
+    bad_motion_editor_fast["joints"][-1]["max_speed_dps"] = 11
+    expect_rejection(bad_motion_editor_fast, "motion_editor max_speed_dps")
 
     bad_right_speed = json.loads(json.dumps(right_arm))
     bad_right_speed["joints"][-1]["max_speed_dps"] = 2

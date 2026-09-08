@@ -22,11 +22,13 @@ constexpr int kRightArmHomeDegrees = 135;
 constexpr const char* kProfileModeVerified = "verified";
 constexpr const char* kProfileModeCommissioning = "commissioning";
 constexpr const char* kProfileModeCommissioningRightArm = "commissioning_right_arm";
+constexpr const char* kProfileModeMotionEditor = "motion_editor";
 constexpr double kCommissioningJointLimitDegrees = 1.0;
 constexpr double kCommissioningMaxServoRateDps = 1.0;
 constexpr double kCommissioningRightArmJointLimitDegrees = 5.0;
 constexpr double kCommissioningRightArmExtendedJointLimitDegrees = 15.0;
 constexpr double kCommissioningRightArmUpJointLimitDegrees = 70.0;
+constexpr double kMotionEditorMaxServoRateDps = 10.0;
 constexpr int kMotionLiveUsbOwnerId = -0x47555342;
 
 enum class JointIndex : int {
@@ -205,10 +207,16 @@ private:
                                   const char** reason) const;
     bool ProfileIsCommissioning() const;
     bool ProfileIsCommissioningRightArm() const;
+    bool ProfileIsMotionEditor() const;
     bool ProfileRequiresSingleJointSession() const;
     bool ProfileNeedsRightArmInitialization() const;
+    bool ProfileUsesRightArm() const;
+    bool ProfileIsCalibrated() const;
+    bool ProfileStepsOnPassiveClock() const;
+    bool ProfileResetsMotionClockOnPassiveClock() const;
     bool IsJointActiveForProfile(int joint_index) const;
     int ProfileJointCount() const;
+    int RightArmProfileNeutralDegrees() const;
     bool ValidateCommissioningTarget(const std::array<int, kPoseJointCount>& servo_degrees,
                                      const char** reason);
     MotionLivePose PoseFromServoDegrees(const std::array<int, kPoseJointCount>& servo_degrees) const;

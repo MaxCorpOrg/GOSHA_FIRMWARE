@@ -1,4 +1,5 @@
 #include <array>
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -107,8 +108,36 @@ MotionLivePreparedProfile RightArmSymmetricCommissioningProfile(double right_arm
         kRightArmHomeDegrees + right_arm_extent_int);
 }
 
+MotionLivePreparedProfile MotionEditorProfile(double right_arm_min = -70.0,
+                                              double right_arm_max = 55.0,
+                                              int right_arm_neutral = 125,
+                                              double max_speed_dps = 5.0) {
+    const int right_servo_min = static_cast<int>(
+        std::min(right_arm_neutral + right_arm_min, right_arm_neutral + right_arm_max));
+    const int right_servo_max = static_cast<int>(
+        std::max(right_arm_neutral + right_arm_min, right_arm_neutral + right_arm_max));
+    return {
+        "gosha-preview-v1",
+        "323456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+        "dbcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        300,
+        20,
+        {{
+            {"leg_negative_x", "left_leg", 0, 17, 0, 90, 1, -35.0, 35.0, 55, 125, max_speed_dps},
+            {"leg_positive_x", "right_leg", 1, 39, 0, 90, -1, -35.0, 35.0, 55, 125, max_speed_dps},
+            {"foot_negative_x", "left_foot", 2, 18, 0, 90, 1, -30.0, 30.0, 60, 120, max_speed_dps},
+            {"foot_positive_x", "right_foot", 3, 38, 0, 90, -1, -30.0, 30.0, 60, 120, max_speed_dps},
+            {"arm_positive_x", "right_hand", 5, 12, 0, right_arm_neutral, 1,
+             right_arm_min, right_arm_max, right_servo_min, right_servo_max, max_speed_dps},
+        }},
+        "motion_editor",
+        5,
+    };
+}
+
 MotionLiveRuntimeConfig ValidRuntime(bool right_arm_available = false,
-                                     bool right_arm_attached = false) {
+                                     bool right_arm_attached = false,
+                                     int right_arm_neutral = kRightArmHomeDegrees) {
     MotionLiveRuntimeConfig runtime;
     runtime.board_is_gosha_v1 = true;
     runtime.no_motion_safe_profile = true;
@@ -122,7 +151,7 @@ MotionLiveRuntimeConfig ValidRuntime(bool right_arm_available = false,
     runtime.joints[Slot(ServoSlot::kRightFoot)] = {38, 0, 90, true};
     runtime.joints[Slot(ServoSlot::kLeftHand)] = {-1, 0, 45, false};
     runtime.joints[Slot(ServoSlot::kRightHand)] =
-        {right_arm_available ? 12 : -1, 0, kRightArmHomeDegrees, right_arm_attached};
+        {right_arm_available ? 12 : -1, 0, right_arm_neutral, right_arm_attached};
     return runtime;
 }
 
@@ -945,6 +974,133 @@ int main() {
         CHECK(!down_too_far.ok);
         CHECK(std::string(down_too_far.code) == "limit_violation");
         CHECK(!right_core.IsArmed());
+    }
+
+    {
+        MotionLivePreparedProfile impossible_production_editor =
+            MotionEditorProfile(-70.0, 55.0, kRightArmHomeDegrees);
+        MotionLiveCore impossible_core = ConfiguredCore(
+            &impossible_production_editor, ValidRuntime(true, false, kRightArmHomeDegrees));
+        auto impossible_caps = impossible_core.GetCapabilities();
+        CHECK(!impossible_caps.motion_allowed);
+        CHECK(std::string(impossible_caps.reason) == "profile_mismatch");
+
+        MotionLivePreparedProfile editor_profile = MotionEditorProfile();
+        MotionLiveCore editor_core =
+            ConfiguredCore(&editor_profile, ValidRuntime(true, false, kRightArmHomeDegrees));
+        int editor_init_count = 0;
+        int editor_apply_count = 0;
+        std::array<int, kPoseJointCount> editor_last_apply{};
+        editor_core.SetRightArmInitializer([&](int home_degrees) {
+            ++editor_init_count;
+            return home_degrees == 125;
+        });
+        editor_core.SetHardwareApplier([&](const std::array<int, kPoseJointCount>& target) {
+            ++editor_apply_count;
+            editor_last_apply = target;
+            return true;
+        });
+
+        auto editor_caps = editor_core.GetCapabilities();
+        CHECK(!editor_caps.motion_allowed);
+        CHECK(std::string(editor_caps.reason) == "right_arm_initialization_required");
+        CHECK(!editor_caps.commissioning);
+        CHECK(!editor_caps.calibrated);
+        CHECK(editor_caps.right_arm_available);
+        CHECK(!editor_caps.right_arm_initialized);
+        CHECK(editor_caps.initialization_required);
+        CHECK(std::string(editor_caps.initialization_op) == "initialize_right_arm");
+        CHECK(editor_caps.joint_limit_count == 5);
+        CHECK(std::string(editor_caps.joint_limits[0].id) == "leg_negative_x");
+        CHECK(editor_caps.joint_limits[0].min_relative_degrees == -35.0);
+        CHECK(editor_caps.joint_limits[0].max_relative_degrees == 35.0);
+        CHECK(editor_caps.joint_limits[0].max_speed_dps == 5.0);
+        CHECK(std::string(editor_caps.joint_limits[4].id) == "arm_positive_x");
+        CHECK(editor_caps.joint_limits[4].min_relative_degrees == -70.0);
+        CHECK(editor_caps.joint_limits[4].max_relative_degrees == 55.0);
+        CHECK(editor_caps.joint_limits[4].max_speed_dps == 5.0);
+
+        auto editor_init = editor_core.InitializeRightArm(
+            45, editor_profile.calibration_id, true);
+        CHECK(editor_init.ok);
+        CHECK(editor_init_count == 1);
+        editor_caps = editor_core.GetCapabilities();
+        CHECK(editor_caps.motion_allowed);
+        CHECK(!editor_caps.commissioning);
+        CHECK(!editor_caps.calibrated);
+        CHECK(editor_caps.right_arm_initialized);
+        CHECK(!editor_caps.initialization_required);
+
+        auto editor_armed = editor_core.Arm(
+            45, editor_profile.calibration_id, true, "session_motion_editor_all", 120000);
+        CHECK(editor_armed.ok);
+        auto editor_pose = editor_core.Pose(
+            45, editor_armed.session_id, 1, RightArmTarget(35, -35, 30, -30, 55), 5,
+            120100);
+        CHECK(editor_pose.ok);
+        CHECK(editor_core.IsArmed());
+        CHECK(editor_apply_count == 0);
+
+        for (uint32_t seq = 2; seq <= 12; ++seq) {
+            auto editor_keepalive = editor_core.Keepalive(
+                45, editor_armed.session_id, seq, 120100 + (seq - 1) * 250);
+            CHECK(editor_keepalive.ok);
+            CHECK(!editor_keepalive.should_apply);
+            CHECK(editor_apply_count == 0);
+        }
+
+        editor_pose = editor_core.Pose(
+            45, editor_armed.session_id, 13, RightArmTarget(35, -35, 30, -30, 55), 5,
+            123100);
+        CHECK(editor_pose.ok);
+        CHECK(editor_pose.should_apply);
+        CHECK(editor_apply_count == 1);
+        CHECK(editor_last_apply[Slot(ServoSlot::kLeftHand)] == 90);
+        CHECK(editor_last_apply[Slot(ServoSlot::kRightHand)] <= 127);
+        CHECK(editor_pose.commanded_pose.relative_degrees[Joint(JointIndex::kArmPositiveX)] <=
+              2.0);
+        CHECK(editor_pose.commanded_pose.relative_degrees[Joint(JointIndex::kLegNegativeX)] <=
+              2.0);
+
+        editor_pose = editor_core.Pose(
+            45, editor_armed.session_id, 14, RightArmTarget(-35, 35, -30, 30, -70), 5,
+            123350);
+        CHECK(editor_pose.ok);
+        CHECK(editor_core.IsArmed());
+        auto editor_stop = editor_core.Stop(45, editor_armed.session_id, 15);
+        CHECK(editor_stop.stopped);
+        CHECK(!editor_core.IsArmed());
+
+        MotionLivePreparedProfile narrowed_editor =
+            MotionEditorProfile(-70.0, 45.0, kRightArmHomeDegrees);
+        MotionLiveCore narrowed_core = ConfiguredCore(
+            &narrowed_editor, ValidRuntime(true, false, kRightArmHomeDegrees));
+        narrowed_core.SetRightArmInitializer([](int home_degrees) {
+            return home_degrees == kRightArmHomeDegrees;
+        });
+        narrowed_core.SetHardwareApplier([](const std::array<int, kPoseJointCount>&) {
+            return true;
+        });
+        auto narrowed_caps = narrowed_core.GetCapabilities();
+        CHECK(!narrowed_caps.motion_allowed);
+        CHECK(std::string(narrowed_caps.reason) == "right_arm_initialization_required");
+        CHECK(narrowed_caps.joint_limits[4].max_relative_degrees == 45.0);
+        CHECK(narrowed_core.InitializeRightArm(46, narrowed_editor.calibration_id, true).ok);
+        CHECK(narrowed_core.GetCapabilities().motion_allowed);
+
+        MotionLivePreparedProfile bad_speed_editor = MotionEditorProfile(-70.0, 55.0, 125, 11.0);
+        MotionLiveCore bad_speed_core =
+            ConfiguredCore(&bad_speed_editor, ValidRuntime(true, false, kRightArmHomeDegrees));
+        CHECK(!bad_speed_core.GetCapabilities().motion_allowed);
+        CHECK(std::string(bad_speed_core.GetCapabilities().reason) == "profile_mismatch");
+
+        MotionLivePreparedProfile bad_lower_editor = MotionEditorProfile();
+        bad_lower_editor.joints[0].max_relative_degrees = 34.0;
+        bad_lower_editor.joints[0].max_servo_degrees = 124;
+        MotionLiveCore bad_lower_core =
+            ConfiguredCore(&bad_lower_editor, ValidRuntime(true, false, kRightArmHomeDegrees));
+        CHECK(!bad_lower_core.GetCapabilities().motion_allowed);
+        CHECK(std::string(bad_lower_core.GetCapabilities().reason) == "profile_mismatch");
     }
 
     {

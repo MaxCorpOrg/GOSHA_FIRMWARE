@@ -111,6 +111,30 @@ commissioning-кандидатом, а не verified/calibrated диапазон
 Профиль всё равно требует локальный access key, generated header вне Git,
 совпадение pin/trim/neutral с runtime и те же no-motion/safe-neutral guards.
 
+## Motion editor Live
+
+`mode=motion_editor` — source-only режим для обычного редактора движений. Он
+остаётся owner-defined и не считается verified calibration:
+`commissioning=false`, `calibrated=false`. В одной authenticated session можно
+вести все доступные суставы без one-joint lock. Текущий active set — 5 joints:
+ноги `[-35,+35]`, стопы `[-30,+30]`, правая рука
+`arm_positive_x -> right_hand`; `arm_negative_x`/`left_hand` остаются NC. Editor
+profile принимает speed `1..10°/с`; UI default `5°/с` совместим.
+
+Полный 3D-запрос правой руки `[-70,+55]` нельзя использовать с текущей
+production нейтралью: `neutral=135`, `direction=+1` даёт servo `65..190`, а
+серво-контракт остаётся `0..180`. Firmware не clamp'ит, не меняет нейтраль и не
+подменяет углы. Full range проходит только при явно заданной достижимой
+нейтрали, например synthetic `neutral=125` даёт servo `55..180`. Более узкий
+правый range внутри `[-70,+55]` допустим только как явный owner/mechanical
+profile; фактический диапазон виден клиенту через `joint_limits`.
+
+В `motion_editor` `keepalive` и timer `Tick` не двигают суставы и не вызывают
+`StepTowardTarget`; они только обновляют motion clock, чтобы idle не копил
+delta для следующего POSE. Движение идёт только через POSE stream.
+`initialize_right_arm`, auth/session/watchdog 300 мс, STOP без Home/detach и
+no-motion/safe-neutral guards сохраняются.
+
 ## Live-настройка в редакторе движений
 
 Ветка `codex/motion-live-20260906` содержит обработчик `gosha.motion.live.v1`
@@ -130,8 +154,9 @@ Live-сообщения обрабатываются перед старым MCP
   `-DGOSHA_MOTION_LIVE_PROFILE_HEADER=<абсолютный-локальный-путь>`;
 - совпадение профиля с выводами, подстройками, подключёнными каналами и
   выполненным начальным удержанием нейтрали; в lower-body commissioning обе
-  руки должны оставаться NC, в `commissioning_right_arm` левая рука остаётся NC,
-  а правая доступна только после отдельного `initialize_right_arm`;
+  руки должны оставаться NC, в `commissioning_right_arm` и `motion_editor` левая
+  рука остаётся NC, а правая доступна только после отдельного
+  `initialize_right_arm`;
 - работающий контроль потери связи и правильный ключ доступа.
 
 Профиль готовится скриптом `firmware/scripts/prepare_live_profile.py` из

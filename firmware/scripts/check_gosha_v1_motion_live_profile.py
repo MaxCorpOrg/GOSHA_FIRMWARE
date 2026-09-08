@@ -281,11 +281,13 @@ def validate_core(core: str, core_h: str) -> None:
         "kProfileModeVerified",
         "kProfileModeCommissioning",
         "kProfileModeCommissioningRightArm",
+        "kProfileModeMotionEditor",
         "kCommissioningJointLimitDegrees = 1.0",
         "kCommissioningMaxServoRateDps = 1.0",
         "kCommissioningRightArmJointLimitDegrees = 5.0",
         "kCommissioningRightArmExtendedJointLimitDegrees = 15.0",
         "kCommissioningRightArmUpJointLimitDegrees = 70.0",
+        "kMotionEditorMaxServoRateDps = 10.0",
         "kMotionLiveUsbOwnerId = -0x47555342",
         '"leg_negative_x"',
         '"leg_positive_x"',
@@ -304,6 +306,12 @@ def validate_core(core: str, core_h: str) -> None:
         "InitializeRightArmHardware",
         "ValidateBaseSafety",
         "ProfileNeedsRightArmInitialization",
+        "ProfileUsesRightArm",
+        "ProfileIsMotionEditor",
+        "ProfileIsCalibrated",
+        "ProfileStepsOnPassiveClock",
+        "ProfileResetsMotionClockOnPassiveClock",
+        "MotionEditorExpectedRange",
         "ProfileRequiresSingleJointSession",
         "ProfileJointCount",
     ):
@@ -341,9 +349,9 @@ def validate_core(core: str, core_h: str) -> None:
             "joint.max_servo_degrees != right_arm_range.max_servo_degrees" in core and
             "-kCommissioningRightArmUpJointLimitDegrees" in core,
             "right arm must be exact direction +1 and one of the approved servo ranges")
-    require("ProfileIsCommissioningRightArm() && joint_count != kMaxActiveJointCount" in core and
-            "!ProfileIsCommissioningRightArm() && joint_count != kActiveJointCount" in core,
-            "new profile must be five joints while old profiles stay four joints")
+    require("ProfileUsesRightArm() && joint_count != kMaxActiveJointCount" in core and
+            "!ProfileUsesRightArm() && joint_count != kActiveJointCount" in core,
+            "right-arm modes must be five joints while old lower-body profiles stay four joints")
     require("seen_servos[static_cast<int>(ServoSlot::kLeftHand)]" in core and
             "seen_servos[static_cast<int>(ServoSlot::kRightHand)]" in core,
             "profile validation must distinguish left-hand slot4 from right-hand slot5")
@@ -351,9 +359,9 @@ def validate_core(core: str, core_h: str) -> None:
             "right_hand.attached != right_arm_initialized_" in core,
             "runtime validation must gate right-hand GPIO12 attachment state")
     require("caps.commissioning = ProfileRequiresSingleJointSession()" in core and
-            "caps.calibrated = !caps.commissioning" in core and
+            "caps.calibrated = ProfileIsCalibrated()" in core and
             "caps.mode = profile_->mode" in core,
-            "capabilities must distinguish commissioning modes from verified calibration")
+            "capabilities must distinguish commissioning/editor modes from verified calibration")
     require("caps.initialization_required" in core and '"initialize_right_arm"' in core,
             "capabilities must expose explicit right-arm initialization")
     require("ValidateCommissioningTarget" in core and "session_initial_servo_degrees_" in core_h and
@@ -375,6 +383,22 @@ def validate_core(core: str, core_h: str) -> None:
             "core must reject cap/arm when the periodic watchdog is unavailable")
     require("kSessionBusy" in core and "Another Live session is already armed" in core,
             "core must reject a second arm while a session is active")
+    require("ProfileIsMotionEditor()" in core and
+            "joint.max_speed_dps > kMotionEditorMaxServoRateDps" in core and
+            "joint.min_relative_degrees < editor_min" in core and
+            "joint.max_relative_degrees > editor_max" in core,
+            "motion_editor must validate owner-defined ranges and <=10 dps")
+    require("bool MotionLiveCore::ProfileStepsOnPassiveClock() const {\n"
+            "    return !ProfileIsCommissioningRightArm() && !ProfileIsMotionEditor();\n"
+            "}" in core and
+            "bool MotionLiveCore::ProfileResetsMotionClockOnPassiveClock() const {\n"
+            "    return ProfileIsMotionEditor();\n"
+            "}" in core,
+            "motion_editor must opt out of passive stepping and reset passive motion clock")
+    require("ProfileStepsOnPassiveClock()" in core and
+            "ProfileResetsMotionClockOnPassiveClock()" in core and
+            "last_motion_step_ms_ = now_ms" in core,
+            "motion_editor passive keepalive/tick must reset the clock without secret stepping")
     require("StepTowardTarget" in core and "max_delta" in core and "std::lround" in core,
             "core must limit applied motion with a fractional accumulator and integer PWM rounding")
     require("ServoIndexForKey" in core and "ExpectedPinForServoIndex" in core,
@@ -401,18 +425,24 @@ def validate_core(core: str, core_h: str) -> None:
             "initialize_right_arm must be rejected while a session is active")
     require("ValidateBaseSafety" in init_body and "EvaluateSafety" not in init_body,
             "initialize_right_arm must run base safety without blocking itself on initialization_required")
-    require("right_arm_initialized_" in init_body and "InitializeRightArmHardware(kRightArmHomeDegrees)" in init_body,
-            "initialize_right_arm must exact-once attach and hold home135")
+    require("right_arm_initialized_" in init_body and
+            "const int right_arm_neutral = RightArmProfileNeutralDegrees()" in init_body and
+            "InitializeRightArmHardware(right_arm_neutral)" in init_body,
+            "initialize_right_arm must exact-once attach and hold the profile right-arm neutral")
     require("right_arm_initialization_failed_ = true" in init_body,
             "initialize_right_arm failure must latch closed without auto retries")
     keepalive_body = extract_body(core, r"MotionLiveResult\s+MotionLiveCore::Keepalive\s*\([^)]*\)",
                                   "MotionLiveCore::Keepalive")
-    require("!ProfileIsCommissioningRightArm()" in keepalive_body and "StepTowardTarget" in keepalive_body,
-            "right-arm keepalive must not advance motion")
+    require("ProfileStepsOnPassiveClock()" in keepalive_body and
+            "ProfileResetsMotionClockOnPassiveClock()" in keepalive_body and
+            "last_motion_step_ms_ = now_ms" in keepalive_body,
+            "editor keepalive must not advance motion and must reset accumulated dt")
     tick_body = extract_body(core, r"MotionLiveResult\s+MotionLiveCore::Tick\s*\([^)]*\)",
                              "MotionLiveCore::Tick")
-    require("!ProfileIsCommissioningRightArm()" in tick_body and "StepTowardTarget" in tick_body,
-            "right-arm timer tick must not advance motion")
+    require("ProfileStepsOnPassiveClock()" in tick_body and
+            "ProfileResetsMotionClockOnPassiveClock()" in tick_body and
+            "last_motion_step_ms_ = now_ms" in tick_body,
+            "editor timer tick must not advance motion and must reset accumulated dt")
 
 
 def validate_controller(controller: str, movements: str) -> None:
@@ -564,7 +594,10 @@ def validate_prepare(prepare: str) -> None:
         "PROFILE_MODE_VERIFIED = \"verified\"",
         "PROFILE_MODE_COMMISSIONING = \"commissioning\"",
         "PROFILE_MODE_COMMISSIONING_RIGHT_ARM = \"commissioning_right_arm\"",
+        "PROFILE_MODE_MOTION_EDITOR = \"motion_editor\"",
         "RIGHT_ARM_HOME_DEGREES = 135",
+        "MOTION_EDITOR_MAX_SPEED_DPS = 10.0",
+        "MOTION_EDITOR_RANGES",
         "RIGHT_ARM_DEFAULT_LIMIT_DEGREES = 5.0",
         "RIGHT_ARM_EXTENDED_LIMIT_DEGREES = 15.0",
         "RIGHT_ARM_70_UP_LIMIT_DEGREES = 70.0",
@@ -579,10 +612,15 @@ def validate_prepare(prepare: str) -> None:
         "sort_keys=True",
         "calibration_id is computed",
         "plaintext access_key was not written",
-        "mode must be verified, commissioning or commissioning_right_arm",
+        "mode must be verified, commissioning, commissioning_right_arm or motion_editor",
         "commissioning limits must be exactly",
         "right-arm commissioning range must be exactly",
         "[-70,+15]/servo65..150",
+        "motion_editor right-arm range must stay within [-70,+55]",
+        "motion_editor max_speed_dps must be within 1..10",
+        "motion_editor synthetic right arm did not map [-70,+55] into servo55..180",
+        "motion_editor explicit narrowed right arm did not map neutral135 into servo65..180",
+        "relative mapping leaves",
         "commissioning max_speed_dps must be <=",
         "arm_positive_x must bind to right_hand slot5 GPIO12",
         "left_hand is unavailable",
@@ -657,6 +695,19 @@ def expect_rejection(values: dict[str, str], key: str, needle: str, replacement:
         raise GuardError(f"negative test was accepted: {error}")
 
 
+def expect_rejection_all(values: dict[str, str], key: str, needle: str,
+                         replacement: str, error: str) -> None:
+    mutated = dict(values)
+    require(needle in mutated[key], f"self-test mutation needle missing: {needle}")
+    mutated[key] = mutated[key].replace(needle, replacement)
+    try:
+        validate_tree(mutated)
+    except GuardError as exc:
+        require(error in str(exc), f"negative test did not report {error}: {exc}")
+    else:
+        raise GuardError(f"negative test was accepted: {error}")
+
+
 def run_self_test() -> None:
     values = current_values()
     validate_tree(values)
@@ -721,7 +772,7 @@ def run_self_test() -> None:
         "kRightArmHomeDegrees = 45",
         "kRightArmHomeDegrees = 135",
     )
-    expect_rejection(
+    expect_rejection_all(
         values,
         "core",
         "joint.direction != 1 ||",
@@ -745,9 +796,9 @@ def run_self_test() -> None:
     expect_rejection(
         values,
         "core",
-        "if (!ProfileIsCommissioningRightArm()) {\n        if (!StepTowardTarget(now_ms, &reason, &hardware_changed))",
-        "if (true) {\n        if (!StepTowardTarget(now_ms, &reason, &hardware_changed))",
-        "keepalive",
+        "bool MotionLiveCore::ProfileResetsMotionClockOnPassiveClock() const {\n    return ProfileIsMotionEditor();\n}",
+        "bool MotionLiveCore::ProfileResetsMotionClockOnPassiveClock() const {\n    return false;\n}",
+        "passive stepping",
     )
     expect_rejection(
         values,

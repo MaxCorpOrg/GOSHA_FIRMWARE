@@ -97,6 +97,29 @@ USB transport не выполняет init/arm/pose на boot или connect. О
 только framed JSON-команды. Правый канал не включается от открытия USB,
 reconnect, `hello`, `arm` до init, `keepalive`, STOP или watchdog.
 
+Новый source-only режим полного редактора — `motion_editor`. Он не является
+verified calibration: capabilities возвращают `commissioning=false`,
+`calibrated=false`, `right_arm_available=true`, а до отдельного authenticated
+`initialize_right_arm` — `initialization_required=true`. В одной session можно
+вести все доступные суставы; one-joint commissioning lock не применяется.
+Текущий active set остаётся 5 суставов: ноги `[-35,+35]`, стопы `[-30,+30]`,
+правая рука `arm_positive_x -> right_hand`; левая рука/`arm_negative_x` остаются
+NC. Speed для editor profile — `1..10°/с`, UI default `5°/с` совместим.
+
+Полный 3D-запрос правой руки `[-70,+55]` конфликтует с текущей production
+нейтралью: `neutral=135`, `direction=+1` даёт servo `65..190`, а контракт servo
+остаётся `0..180`. Firmware не clamp'ит и не меняет нейтраль. Full range
+принимается только если explicit owner/mechanical profile задаёт достижимую
+нейтраль, например synthetic `neutral=125` даёт servo `55..180`. Более узкий
+правый range внутри `[-70,+55]` допустим только явно; тогда `joint_limits` в
+caps отражают фактический range.
+
+В `motion_editor` `keepalive` и timer `Tick` не двигают суставы и не вызывают
+`StepTowardTarget`; они обновляют motion clock, чтобы idle не накапливал
+`dt` для следующего POSE. Движение идёт только через POSE stream. STOP,
+watchdog 300 мс, auth/session, explicit right init, no-motion/safe-neutral и
+OTA/reboot/assets protections сохраняются.
+
 Сохранён текущий right-arm commissioning contract. С 2026-09-08 он
 backward-compatible: старые/default профили остаются на правой руке ±5°,
 заметный ход ±15° доступен только через явно подготовленный symmetric 15°
@@ -142,9 +165,14 @@ capabilities отражают фактические limits профиля.
   explicit USB STOP, watchdog disarm USB-owned session, старый ±5 профиль не
   может выполнить 10° sweep в одной сессии, явный ±15 принимает один right-arm
   joint при 1°/с и отклоняет speed/multi-joint violations, candidate
-  `[-70,+15]` идёт к servo65 и servo150 при сохранении one-joint/session gates;
+  `[-70,+15]` идёт к servo65 и servo150 при сохранении one-joint/session gates,
+  `motion_editor` принимает synthetic full `[-70,+55]` при neutral125,
+  отвергает production neutral135/full servo190, разрешает multi-joint POSE
+  и проверяет no-motion/no-burst keepalive;
 - `check_gosha_v1_motion_live_profile.py`: opt-in dependencies, shared sender,
   USB parser/driver tokens, console separation, no payload/access-key logging,
-  strict right-arm ranges ровно `[-5,+5]`, `[-15,+15]` или `[-70,+15]`;
+  strict right-arm commissioning ranges ровно `[-5,+5]`, `[-15,+15]` или
+  `[-70,+15]`, editor `commissioning=false/calibrated=false` и passive clock
+  без тайного движения;
 - `check_gosha_v1_safe_neutral_boot_profile.py`: checked-in configs не включают
   Live/right-arm/USB флаги по умолчанию.
