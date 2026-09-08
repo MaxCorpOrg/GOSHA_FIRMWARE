@@ -90,13 +90,20 @@ GOSHA_OTA_URL='https://maintenance.invalid/firmware/' \
 не открывает полноценную анимацию: capabilities возвращают
 `commissioning=true`, `calibrated=false`, limits каждого lower-body joint
 строго `[-1,+1]`, `max_speed_dps <= 1`, measured pose и tilt остаются `null`.
+Отдельный `mode=commissioning_right_arm` добавляет только правую руку
+`arm_positive_x -> right_hand`, slot 5, GPIO12, `neutral_degrees=135`,
+`direction=+1`. Правая рука в этом режиме принимает ровно symmetric ±5°
+(`servo 130..140`) или явно заданный symmetric ±15° (`servo 120..150`);
+default/sample остаются ±5°. Ноги/ступни остаются strict ±1°, левая рука
+остаётся NC, скорость для commissioning — 1°/с.
 
 Внутри одной сессии фиксируется начальная applied-поза и первый физический
 канал, который отличается от неё. До STOP или watchdog другой физический канал
 двигать нельзя даже после возврата первого в baseline; переход дальше чем на
-один градус от baseline также отклоняется. Профиль всё равно требует локальный
-access key, generated header вне Git, совпадение pin/trim/neutral с runtime и
-те же no-motion/safe-neutral guards.
+фактический extent профиля от baseline также отклоняется: для lower-body это
+1°, для старого right-arm ±5° это 5°, для явного right-arm ±15° это 15°.
+Профиль всё равно требует локальный access key, generated header вне Git,
+совпадение pin/trim/neutral с runtime и те же no-motion/safe-neutral guards.
 
 ## Live-настройка в редакторе движений
 
@@ -116,18 +123,22 @@ Live-сообщения обрабатываются перед старым MCP
 - локальный заголовок профиля, переданный через
   `-DGOSHA_MOTION_LIVE_PROFILE_HEADER=<абсолютный-локальный-путь>`;
 - совпадение профиля с выводами, подстройками, подключёнными каналами и
-  выполненным начальным удержанием нейтрали; обе руки должны оставаться NC;
+  выполненным начальным удержанием нейтрали; в lower-body commissioning обе
+  руки должны оставаться NC, в `commissioning_right_arm` левая рука остаётся NC,
+  а правая доступна только после отдельного `initialize_right_arm`;
 - работающий контроль потери связи и правильный ключ доступа.
 
 Профиль готовится скриптом `firmware/scripts/prepare_live_profile.py` из
 локального JSON. В нём обязательны `profile_id`, `access_key`, `max_rate_hz`
-и четыре записи `joints`: `id`, `servo_key`, `pin`, `trim`, `neutral_degrees`,
-`direction`, `min`, `max`, `servo_min_degrees`, `servo_max_degrees`,
-`max_speed_dps`. Нейтраль текущего контроллера — 90°, знак — 1 или -1.
+и четыре либо пять записей `joints`: `id`, `servo_key`, `pin`, `trim`,
+`neutral_degrees`, `direction`, `min`, `max`, `servo_min_degrees`,
+`servo_max_degrees`, `max_speed_dps`. Нейтраль lower-body текущего контроллера
+— 90°, знак — 1 или -1.
 Параметры берутся из проверенной механической калибровки; направления и
 границы из 3D-предпросмотра её не заменяют. Привязка стороны модели к
-`left_leg/right_leg/left_foot/right_foot` указывается явно. Руки в первый
-профиль Live не входят.
+`left_leg/right_leg/left_foot/right_foot` указывается явно. Для
+`commissioning_right_arm` правый канал указывается явно как `right_hand`;
+`arm_negative_x`/`left_hand` не входят.
 
 Генератор вычисляет `calibration_id` как SHA-256 канонических проверенных
 параметров. Изменение привязки, пределов или подстройки меняет этот идентификатор.

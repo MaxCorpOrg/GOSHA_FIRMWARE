@@ -128,6 +128,18 @@ int RoundServoDegree(double value) {
     return static_cast<int>(std::lround(value));
 }
 
+double RightArmPreparedExtentDegrees(const MotionLiveJointProfile& joint) {
+    if (joint.min_relative_degrees == -kCommissioningRightArmJointLimitDegrees &&
+        joint.max_relative_degrees == kCommissioningRightArmJointLimitDegrees) {
+        return kCommissioningRightArmJointLimitDegrees;
+    }
+    if (joint.min_relative_degrees == -kCommissioningRightArmExtendedJointLimitDegrees &&
+        joint.max_relative_degrees == kCommissioningRightArmExtendedJointLimitDegrees) {
+        return kCommissioningRightArmExtendedJointLimitDegrees;
+    }
+    return 0.0;
+}
+
 }  // namespace
 
 const std::array<JointSpec, kPoseJointCount> kJointSpecs = {{
@@ -296,18 +308,20 @@ bool MotionLiveCore::ValidatePreparedProfile(const char** reason) const {
             }
             const bool right_arm_joint =
                 joint_index == static_cast<int>(JointIndex::kArmPositiveX);
-            const double limit = right_arm_joint ? kCommissioningRightArmJointLimitDegrees
-                                                 : kCommissioningJointLimitDegrees;
-            if (joint.min_relative_degrees != -limit ||
-                joint.max_relative_degrees != limit) {
-                *reason = kProfileMismatch;
-                return false;
-            }
-            if (right_arm_joint &&
-                (joint.direction != 1 ||
-                 joint.servo_index != static_cast<int>(ServoSlot::kRightHand) ||
-                 joint.min_servo_degrees != kRightArmHomeDegrees - 5 ||
-                 joint.max_servo_degrees != kRightArmHomeDegrees + 5)) {
+            if (right_arm_joint) {
+                const double right_arm_extent = RightArmPreparedExtentDegrees(joint);
+                if (right_arm_extent <= 0.0 ||
+                    joint.direction != 1 ||
+                    joint.servo_index != static_cast<int>(ServoSlot::kRightHand) ||
+                    joint.min_servo_degrees !=
+                        kRightArmHomeDegrees - static_cast<int>(right_arm_extent) ||
+                    joint.max_servo_degrees !=
+                        kRightArmHomeDegrees + static_cast<int>(right_arm_extent)) {
+                    *reason = kProfileMismatch;
+                    return false;
+                }
+            } else if (joint.min_relative_degrees != -kCommissioningJointLimitDegrees ||
+                       joint.max_relative_degrees != kCommissioningJointLimitDegrees) {
                 *reason = kProfileMismatch;
                 return false;
             }
@@ -675,9 +689,15 @@ bool MotionLiveCore::ValidateCommissioningTarget(
         if (delta == 0) {
             continue;
         }
-        const int max_delta = slot == static_cast<int>(ServoSlot::kRightHand)
-                                  ? static_cast<int>(kCommissioningRightArmJointLimitDegrees)
-                                  : static_cast<int>(kCommissioningJointLimitDegrees);
+        int max_delta = static_cast<int>(kCommissioningJointLimitDegrees);
+        if (slot == static_cast<int>(ServoSlot::kRightHand)) {
+            const double right_arm_extent = RightArmPreparedExtentDegrees(joint);
+            if (right_arm_extent <= 0.0) {
+                *reason = kProfileMismatch;
+                return false;
+            }
+            max_delta = static_cast<int>(right_arm_extent);
+        }
         if (std::abs(delta) > max_delta) {
             *reason = kCommissioningSingleJoint;
             return false;

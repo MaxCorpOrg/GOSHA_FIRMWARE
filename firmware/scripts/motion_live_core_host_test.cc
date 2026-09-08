@@ -76,7 +76,8 @@ MotionLivePreparedProfile CommissioningProfile() {
     };
 }
 
-MotionLivePreparedProfile RightArmCommissioningProfile() {
+MotionLivePreparedProfile RightArmCommissioningProfile(double right_arm_extent = 5.0) {
+    const int right_arm_extent_int = static_cast<int>(right_arm_extent);
     return {
         "gosha-preview-v1",
         "223456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
@@ -88,7 +89,10 @@ MotionLivePreparedProfile RightArmCommissioningProfile() {
             {"leg_positive_x", "right_leg", 1, 39, 0, 90, -1, -1.0, 1.0, 89, 91, 1.0},
             {"foot_negative_x", "left_foot", 2, 18, 0, 90, 1, -1.0, 1.0, 89, 91, 1.0},
             {"foot_positive_x", "right_foot", 3, 38, 0, 90, -1, -1.0, 1.0, 89, 91, 1.0},
-            {"arm_positive_x", "right_hand", 5, 12, 0, 135, 1, -5.0, 5.0, 130, 140, 1.0},
+            {"arm_positive_x", "right_hand", 5, 12, 0, 135, 1,
+             -right_arm_extent, right_arm_extent,
+             kRightArmHomeDegrees - right_arm_extent_int,
+             kRightArmHomeDegrees + right_arm_extent_int, 1.0},
         }},
         "commissioning_right_arm",
         5,
@@ -482,6 +486,18 @@ int main() {
         CHECK(right_caps.joint_limits[4].max_speed_dps == 1.0);
         CHECK(right_caps.commanded_pose.relative_degrees[Joint(JointIndex::kArmPositiveX)] == 0.0);
 
+        MotionLivePreparedProfile right_profile_15 = RightArmCommissioningProfile(15.0);
+        MotionLiveCore right_caps_15_core =
+            ConfiguredCore(&right_profile_15, ValidRuntime(true, false));
+        auto right_caps_15 = right_caps_15_core.GetCapabilities();
+        CHECK(!right_caps_15.motion_allowed);
+        CHECK(std::string(right_caps_15.reason) == "right_arm_initialization_required");
+        CHECK(right_caps_15.joint_limit_count == 5);
+        CHECK(std::string(right_caps_15.joint_limits[4].id) == "arm_positive_x");
+        CHECK(right_caps_15.joint_limits[4].min_relative_degrees == -15.0);
+        CHECK(right_caps_15.joint_limits[4].max_relative_degrees == 15.0);
+        CHECK(right_caps_15.joint_limits[4].max_speed_dps == 1.0);
+
         auto arm_before_init = right_core.Arm(
             40, right_profile.calibration_id, true, "session_right_preinit", 30000);
         CHECK(!arm_before_init.ok);
@@ -669,6 +685,100 @@ int main() {
         MotionLiveCore old_five_core = ConfiguredCore(&old_five_joint, ValidRuntime(true, false));
         CHECK(!old_five_core.GetCapabilities().motion_allowed);
         CHECK(std::string(old_five_core.GetCapabilities().reason) == "profile_mismatch");
+
+        MotionLivePreparedProfile ten_degree_profile = RightArmCommissioningProfile(10.0);
+        MotionLiveCore ten_degree_core =
+            ConfiguredCore(&ten_degree_profile, ValidRuntime(true, false));
+        CHECK(!ten_degree_core.GetCapabilities().motion_allowed);
+        CHECK(std::string(ten_degree_core.GetCapabilities().reason) == "profile_mismatch");
+
+        MotionLivePreparedProfile too_wide_profile = RightArmCommissioningProfile(16.0);
+        MotionLiveCore too_wide_core =
+            ConfiguredCore(&too_wide_profile, ValidRuntime(true, false));
+        CHECK(!too_wide_core.GetCapabilities().motion_allowed);
+        CHECK(std::string(too_wide_core.GetCapabilities().reason) == "profile_mismatch");
+
+        MotionLivePreparedProfile asymmetric_profile = RightArmCommissioningProfile(15.0);
+        asymmetric_profile.joints[4].min_relative_degrees = -5.0;
+        asymmetric_profile.joints[4].min_servo_degrees = 130;
+        MotionLiveCore asymmetric_core =
+            ConfiguredCore(&asymmetric_profile, ValidRuntime(true, false));
+        CHECK(!asymmetric_core.GetCapabilities().motion_allowed);
+        CHECK(std::string(asymmetric_core.GetCapabilities().reason) == "profile_mismatch");
+
+        MotionLivePreparedProfile wrong_bounds_15 = RightArmCommissioningProfile(15.0);
+        wrong_bounds_15.joints[4].min_servo_degrees = 121;
+        MotionLiveCore wrong_bounds_15_core =
+            ConfiguredCore(&wrong_bounds_15, ValidRuntime(true, false));
+        CHECK(!wrong_bounds_15_core.GetCapabilities().motion_allowed);
+        CHECK(std::string(wrong_bounds_15_core.GetCapabilities().reason) == "profile_mismatch");
+    }
+
+    {
+        MotionLivePreparedProfile right_profile = RightArmCommissioningProfile(15.0);
+        MotionLiveCore right_core = ConfiguredCore(&right_profile, ValidRuntime(true, false));
+        int init_count = 0;
+        int right_apply_count = 0;
+        std::array<int, kPoseJointCount> right_last_apply{};
+        right_core.SetRightArmInitializer([&](int home_degrees) {
+            ++init_count;
+            return home_degrees == kRightArmHomeDegrees;
+        });
+        right_core.SetHardwareApplier([&](const std::array<int, kPoseJointCount>& target) {
+            ++right_apply_count;
+            right_last_apply = target;
+            return true;
+        });
+        CHECK(right_core.InitializeRightArm(43, right_profile.calibration_id, true).ok);
+        CHECK(init_count == 1);
+
+        auto right_armed = right_core.Arm(
+            43, right_profile.calibration_id, true, "session_right_15_speed", 80000);
+        CHECK(right_armed.ok);
+        auto right_fast = right_core.Pose(
+            43, right_armed.session_id, 1, RightArmTarget(0, 0, 0, 0, -15), 2, 80010);
+        CHECK(!right_fast.ok);
+        CHECK(std::string(right_fast.code) == "rate_limit");
+        CHECK(!right_core.IsArmed());
+        CHECK(right_apply_count == 0);
+
+        right_armed = right_core.Arm(
+            43, right_profile.calibration_id, true, "session_right_15_single", 81000);
+        CHECK(right_armed.ok);
+        auto right_two_joints = right_core.Pose(
+            43, right_armed.session_id, 1, RightArmTarget(1, 0, 0, 0, -15), 1, 81010);
+        CHECK(!right_two_joints.ok);
+        CHECK(std::string(right_two_joints.code) == "commissioning_single_joint");
+        CHECK(!right_core.IsArmed());
+        CHECK(right_apply_count == 0);
+
+        right_armed = right_core.Arm(
+            43, right_profile.calibration_id, true, "session_right_15_step", 82000);
+        CHECK(right_armed.ok);
+        auto right_step = right_core.Pose(
+            43, right_armed.session_id, 1, RightArmTarget(0, 0, 0, 0, -15), 1, 82010);
+        CHECK(right_step.ok);
+        CHECK(!right_step.should_apply);
+        for (uint32_t seq = 2; seq <= 62; ++seq) {
+            right_step = right_core.Pose(
+                43, right_armed.session_id, seq, RightArmTarget(0, 0, 0, 0, -15), 1,
+                82010 + (seq - 1) * 250);
+            CHECK(right_step.ok);
+        }
+        CHECK(right_apply_count > 0);
+        CHECK(right_last_apply[Slot(ServoSlot::kLeftLeg)] == 90);
+        CHECK(right_last_apply[Slot(ServoSlot::kRightLeg)] == 90);
+        CHECK(right_last_apply[Slot(ServoSlot::kLeftFoot)] == 90);
+        CHECK(right_last_apply[Slot(ServoSlot::kRightFoot)] == 90);
+        CHECK(right_last_apply[Slot(ServoSlot::kLeftHand)] == 90);
+        CHECK(right_last_apply[Slot(ServoSlot::kRightHand)] == 120);
+        CHECK(right_step.commanded_pose.relative_degrees[Joint(JointIndex::kArmPositiveX)] ==
+              -15.0);
+        const int apply_count_before_stop = right_apply_count;
+        auto right_stop = right_core.Stop(43, right_armed.session_id, 63);
+        CHECK(right_stop.stopped);
+        CHECK(right_apply_count == apply_count_before_stop);
+        CHECK(!right_core.IsArmed());
     }
 
     {

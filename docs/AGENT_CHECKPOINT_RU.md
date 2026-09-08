@@ -1,5 +1,35 @@
 # AGENT CHECKPOINT
 
+## Right-arm commissioning ±15 source — 2026-09-08
+
+Статус: готово, не установлено. По свежей задаче владельца исходники USB/Motion
+Live расширены без автоматического изменения старых профилей: `commissioning_right_arm`
+принимает ровно два варианта правой руки — старый/default symmetric ±5°
+(`servo 130..140`) и явно заданный symmetric ±15° (`servo 120..150`).
+Правая рука остаётся только `arm_positive_x -> right_hand`, slot 5, GPIO12,
+`neutral_degrees=135`, `direction=+1`, `max_speed_dps=1`; левая рука остаётся
+NC, ноги/ступни остаются strict ±1° при 1°/с.
+
+`prepare_live_profile.py` сохраняет default/sample ±5° и отвергает right-arm
+варианты ±10°, больше ±15°, asymmetric limits и mismatch servo-bounds. Core
+валидатор принимает только фактический extent профиля 5° или 15° и проверяет
+физические bounds `neutral ± extent`; commissioning session baseline теперь
+ограничивает right-hand delta фактическим extent профиля, поэтому старый ±5°
+профиль не может выполнить sweep на 10° в одной сессии, а явный ±15° профиль
+может выполнить один right-arm шаг до ±15° при 1°/с. Контракт one-joint,
+init-once/failed latch, auth/session/watchdog 300 мс, PWM only POSE, STOP без
+Home/detach и no-motion/OTA/reboot/assets protections не менялись. UI caps mode
+остаётся прежним; `joint_limits` теперь отражают фактические limits профиля
+±5° или ±15°.
+
+Выполнены только host/source проверки без ESP-IDF build, flash, hardware,
+network к роботу или чтения owner-local access key: `prepare_live_profile.py
+--self-test`, `check_gosha_v1_motion_live_profile.py --self-test`,
+`run_right_arm_pwm_route_host_test.py`, `run_motion_live_usb_framing_host_test.py`,
+`motion_live_core_host_test` с ASan/UBSan, guards safe-neutral/no-motion/GPIO3
+audio/pinmap/sensitive logging, `py_compile` и read-only `release.py --list-boards
+--json`.
+
 ## USB Live: установленный образ и приёмка 2026-09-07
 
 Root установил точный source b791edd app-only по 0x20000: SHA-256

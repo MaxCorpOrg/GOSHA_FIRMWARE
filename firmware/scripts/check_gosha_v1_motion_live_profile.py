@@ -284,6 +284,7 @@ def validate_core(core: str, core_h: str) -> None:
         "kCommissioningJointLimitDegrees = 1.0",
         "kCommissioningMaxServoRateDps = 1.0",
         "kCommissioningRightArmJointLimitDegrees = 5.0",
+        "kCommissioningRightArmExtendedJointLimitDegrees = 15.0",
         "kMotionLiveUsbOwnerId = -0x47555342",
         '"leg_negative_x"',
         '"leg_positive_x"',
@@ -328,14 +329,16 @@ def validate_core(core: str, core_h: str) -> None:
             "core must reject unknown or unavailable joints in pose target")
     require("speed_dps > kMaxServoRateDps" in core and "speed_dps > joint.max_speed_dps" in core,
             "core must enforce <=30 dps and per-joint speed")
-    require("joint.min_relative_degrees != -limit" in core and
-            "joint.max_relative_degrees != limit" in core and
+    require("joint.min_relative_degrees != -kCommissioningJointLimitDegrees" in core and
+            "joint.max_relative_degrees != kCommissioningJointLimitDegrees" in core and
             "joint.max_speed_dps > kCommissioningMaxServoRateDps" in core,
-            "commissioning modes must force exact prepared limits and <=1 dps")
-    require("joint.direction != 1 ||\n                 joint.servo_index" in core and
-            "kRightArmHomeDegrees - 5" in core and
-            "kRightArmHomeDegrees + 5" in core,
-            "right arm must be exact direction +1 and servo 130..140 from home135")
+            "commissioning lower-body limits must stay exact and <=1 dps")
+    require("RightArmPreparedExtentDegrees" in core and
+            "right_arm_extent <= 0.0" in core and
+            "joint.direction != 1 ||" in core and
+            "kRightArmHomeDegrees - static_cast<int>(right_arm_extent)" in core and
+            "kRightArmHomeDegrees + static_cast<int>(right_arm_extent)" in core,
+            "right arm must be exact direction +1 and servo home±5 or home±15")
     require("ProfileIsCommissioningRightArm() && joint_count != kMaxActiveJointCount" in core and
             "!ProfileIsCommissioningRightArm() && joint_count != kActiveJointCount" in core,
             "new profile must be five joints while old profiles stay four joints")
@@ -359,8 +362,9 @@ def validate_core(core: str, core_h: str) -> None:
     require("std::abs(delta) > max_delta" in core and "changed_count > 1" in core,
             "commissioning modes must reject multi-joint and over-baseline deltas")
     require("slot == static_cast<int>(ServoSlot::kRightHand)" in core and
-            "kCommissioningRightArmJointLimitDegrees" in core,
-            "right-arm commissioning must use the 5 degree baseline limit")
+            "RightArmPreparedExtentDegrees(joint)" in core and
+            "max_delta = static_cast<int>(right_arm_extent)" in core,
+            "right-arm commissioning must use the prepared profile baseline limit")
     require("commissioning_servo_index_ = changed_slot" in core,
             "commissioning mode must lock the first changed physical joint")
     require("now_ms - last_command_ms_" in core and "kWatchdogMs" in core,
@@ -559,7 +563,9 @@ def validate_prepare(prepare: str) -> None:
         "PROFILE_MODE_COMMISSIONING = \"commissioning\"",
         "PROFILE_MODE_COMMISSIONING_RIGHT_ARM = \"commissioning_right_arm\"",
         "RIGHT_ARM_HOME_DEGREES = 135",
-        "RIGHT_ARM_LIMIT_DEGREES = 5.0",
+        "RIGHT_ARM_DEFAULT_LIMIT_DEGREES = 5.0",
+        "RIGHT_ARM_EXTENDED_LIMIT_DEGREES = 15.0",
+        "RIGHT_ARM_ALLOWED_LIMIT_DEGREES",
         '"right_hand": {"servo_group": "arm", "servo_index": 5, "pin": 12',
         '"left_hand": {"servo_group": "arm", "servo_index": 4, "pin": 8',
         '"arm_positive_x"',
@@ -572,12 +578,14 @@ def validate_prepare(prepare: str) -> None:
         "plaintext access_key was not written",
         "mode must be verified, commissioning or commissioning_right_arm",
         "commissioning limits must be exactly",
+        "right-arm commissioning limits must be exactly [-5,+5] or [-15,+15]",
         "commissioning max_speed_dps must be <=",
         "arm_positive_x must bind to right_hand slot5 GPIO12",
         "left_hand is unavailable",
         "direction +1",
         "relative -5 commands servo 130",
         "rightHome135",
+        "servo 130..140 or 120..150",
         "servo_key must be explicit",
         "servo_key must stay within",
         '"pin": 17',
