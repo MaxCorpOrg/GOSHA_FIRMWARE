@@ -271,6 +271,13 @@ def validate_adapter(adapter: str, adapter_h: str) -> None:
             "adapter must expose generic transport close disarm")
     require("esp_timer_start_periodic" in adapter and "gosha_live_watchdog" in adapter,
             "watchdog must use a nonblocking periodic timer")
+    watchdog_body = extract_body(adapter, r"void\s+MotionLiveAdapter::WatchdogTick\s*\(\s*\)",
+                                 "MotionLiveAdapter::WatchdogTick")
+    require("MotionLiveTickResult result" in watchdog_body and "core_.Tick(NowMs())" in watchdog_body,
+            "periodic watchdog must use the lightweight core tick result")
+    require("MotionLiveResult" not in watchdog_body and "ReadPwmDiagnostics" not in watchdog_body and
+            "pwm_diagnostics" not in watchdog_body,
+            "periodic watchdog must not allocate response results or read PWM diagnostics")
     require('SendError(sender, root, "bad_json"' in adapter,
             "bad JSON in Live namespace must not fall through to MCP")
 
@@ -319,6 +326,7 @@ def validate_core(core: str, core_h: str) -> None:
         "MotionLiveRightArmInitializer",
         "MotionLivePwmDiagnostics",
         "MotionLivePwmDiagnosticsProvider",
+        "MotionLiveTickResult",
         "SetPwmDiagnosticsProvider",
         "ReadPwmDiagnostics",
         "right_arm_initialized_",
@@ -467,12 +475,18 @@ def validate_core(core: str, core_h: str) -> None:
             "ProfileResetsMotionClockOnPassiveClock()" in keepalive_body and
             "last_motion_step_ms_ = now_ms" in keepalive_body,
             "editor keepalive must not advance motion and must reset accumulated dt")
-    tick_body = extract_body(core, r"MotionLiveResult\s+MotionLiveCore::Tick\s*\([^)]*\)",
+    tick_body = extract_body(core, r"MotionLiveTickResult\s+MotionLiveCore::Tick\s*\([^)]*\)",
                              "MotionLiveCore::Tick")
     require("ProfileStepsOnPassiveClock()" in tick_body and
             "ProfileResetsMotionClockOnPassiveClock()" in tick_body and
             "last_motion_step_ms_ = now_ms" in tick_body,
             "editor timer tick must not advance motion and must reset accumulated dt")
+    require("MotionLiveResult" not in tick_body and "MakeError" not in tick_body and
+            "MakeAck" not in tick_body and "ReadPwmDiagnostics" not in tick_body and
+            "pwm_diagnostics" not in tick_body,
+            "timer tick must stay lightweight and avoid response diagnostics")
+    require("DisarmForTick" in tick_body and "kWatchdogTimeout" in tick_body,
+            "timer tick must preserve timeout disarm through the lightweight path")
 
 
 def validate_controller(controller: str, movements: str) -> None:

@@ -225,11 +225,18 @@ int main() {
         last_apply = target;
         return true;
     });
+    int diagnostics_read_count = 0;
     core.SetPwmDiagnosticsProvider([&]() {
+        ++diagnostics_read_count;
         return diagnostic_snapshot;
     });
 
+    auto idle_tick = core.Tick(900);
+    CHECK(!idle_tick.stopped);
+    CHECK(diagnostics_read_count == 0);
+
     auto caps = core.GetCapabilities();
+    CHECK(diagnostics_read_count == 1);
     CHECK(caps.motion_allowed);
     CHECK(caps.calibrated);
     CHECK(!caps.initialization_required);
@@ -354,7 +361,8 @@ int main() {
     CHECK(slow_pose.commanded_pose.relative_degrees[Joint(JointIndex::kLegNegativeX)] < 10.0);
     auto slow_tick = core.Tick(6250);
     CHECK(!slow_tick.stopped);
-    CHECK(slow_tick.commanded_pose.relative_degrees[Joint(JointIndex::kLegNegativeX)] < 10.0);
+    CHECK(slow_tick.hardware_changed);
+    CHECK(core.CommandedPose().relative_degrees[Joint(JointIndex::kLegNegativeX)] < 10.0);
     stop = core.Stop(10, armed.session_id, 2);
     CHECK(stop.stopped);
     CHECK(!core.IsArmed());
@@ -375,6 +383,61 @@ int main() {
     CHECK(retained.commanded_pose.relative_degrees[Joint(JointIndex::kLegNegativeX)] == 10.0);
     stop = core.Stop(10, armed.session_id, 2);
     CHECK(stop.stopped);
+
+    {
+        MotionLiveCore watchdog_core = ConfiguredCore(&profile, runtime);
+        int watchdog_diagnostics_calls = 0;
+        int watchdog_apply_count = 0;
+        std::array<int, kPoseJointCount> watchdog_last_apply{};
+        watchdog_core.SetPwmDiagnosticsProvider([&]() {
+            ++watchdog_diagnostics_calls;
+            return MotionLivePwmDiagnostics{};
+        });
+        watchdog_core.SetHardwareApplier([&](const std::array<int, kPoseJointCount>& target) {
+            ++watchdog_apply_count;
+            watchdog_last_apply = target;
+            return true;
+        });
+
+        auto unarmed_tick = watchdog_core.Tick(8500);
+        CHECK(!unarmed_tick.stopped);
+        CHECK(!unarmed_tick.hardware_changed);
+        CHECK(watchdog_diagnostics_calls == 0);
+
+        auto watchdog_armed = watchdog_core.Arm(
+            12, profile.calibration_id, true, "session_periodic_watchdog", 9000);
+        CHECK(watchdog_armed.ok);
+        watchdog_diagnostics_calls = 0;
+        auto armed_tick = watchdog_core.Tick(9200);
+        CHECK(!armed_tick.stopped);
+        CHECK(!armed_tick.hardware_changed);
+        CHECK(watchdog_diagnostics_calls == 0);
+        CHECK(watchdog_apply_count == 0);
+
+        auto legacy_pose = watchdog_core.Pose(
+            12, watchdog_armed.session_id, 1, Target(10, 0, 0, 0), 10, 9250);
+        CHECK(legacy_pose.ok);
+        const double before_periodic_step =
+            watchdog_core.CommandedPose().relative_degrees[Joint(JointIndex::kLegNegativeX)];
+        const int apply_count_before_periodic_step = watchdog_apply_count;
+        watchdog_diagnostics_calls = 0;
+        auto legacy_tick = watchdog_core.Tick(9500);
+        CHECK(!legacy_tick.stopped);
+        CHECK(legacy_tick.hardware_changed);
+        CHECK(watchdog_diagnostics_calls == 0);
+        CHECK(watchdog_apply_count > apply_count_before_periodic_step);
+        CHECK(watchdog_core.CommandedPose().relative_degrees[Joint(JointIndex::kLegNegativeX)] >
+              before_periodic_step);
+        CHECK(watchdog_core.CommandedPose().relative_degrees[Joint(JointIndex::kLegNegativeX)] <=
+              10.0);
+        CHECK(watchdog_last_apply[Slot(ServoSlot::kLeftLeg)] >= 90);
+
+        auto timeout = watchdog_core.Tick(9551);
+        CHECK(timeout.stopped);
+        CHECK(std::string(timeout.code) == "watchdog_timeout");
+        CHECK(watchdog_diagnostics_calls == 0);
+        CHECK(!watchdog_core.IsArmed());
+    }
 
     armed = core.Arm(10, profile.calibration_id, true, "session_live_0009", 9000);
     CHECK(armed.ok);
@@ -654,7 +717,7 @@ int main() {
         CHECK(!right_keepalive.should_apply);
         CHECK(right_apply_count == 0);
         CHECK(right_keepalive.commanded_pose.relative_degrees[Joint(JointIndex::kArmPositiveX)] == 0.0);
-        CHECK(!right_core.Tick(50300).should_apply);
+        CHECK(!right_core.Tick(50300).hardware_changed);
         CHECK(right_apply_count == 0);
         for (uint32_t seq = 3; seq <= 22; ++seq) {
             right_step = right_core.Pose(

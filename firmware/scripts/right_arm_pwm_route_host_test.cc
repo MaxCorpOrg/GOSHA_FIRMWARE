@@ -430,6 +430,7 @@ int ExerciseWatchdogNoExtraPwm() {
     const auto watchdog = core.Tick(200311);
     CHECK(watchdog.stopped);
     CHECK(std::string(watchdog.code) == "watchdog_timeout");
+    CHECK(!watchdog.hardware_changed);
     CHECK(!core.IsArmed());
     CHECK(gosha::motion_pwm_host::Events().size() == event_count_before_watchdog);
     CHECK(gosha::motion_pwm_host::EventsForGpio(LedcEventKind::kUpdateDuty,

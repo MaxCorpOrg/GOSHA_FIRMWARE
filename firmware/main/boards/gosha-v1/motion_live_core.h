@@ -182,6 +182,12 @@ struct MotionLiveResult {
     bool stopped = false;
 };
 
+struct MotionLiveTickResult {
+    bool stopped = false;
+    bool hardware_changed = false;
+    const char* code = "ok";
+};
+
 using MotionLiveHardwareApplier = std::function<bool(const std::array<int, kPoseJointCount>&)>;
 using MotionLiveRightArmInitializer = std::function<bool(int)>;
 using MotionLivePwmDiagnosticsProvider = std::function<MotionLivePwmDiagnostics()>;
@@ -213,7 +219,7 @@ public:
     MotionLiveResult Keepalive(int owner_socket, const std::string& session_id, uint32_t seq,
                                uint64_t now_ms);
     MotionLiveResult Stop(int owner_socket, const std::string& session_id, uint32_t seq);
-    MotionLiveResult Tick(uint64_t now_ms);
+    MotionLiveTickResult Tick(uint64_t now_ms);
     void OnTransportClosed(int owner_socket);
     void OnSocketClosed(int owner_socket);
 
@@ -230,6 +236,8 @@ private:
     MotionLiveResult MakeError(const char* code, const char* message) const;
     MotionLiveResult MakeAck(uint32_t seq, bool should_apply) const;
     MotionLiveResult DisarmWithError(const char* code, const char* message, bool stopped);
+    MotionLiveTickResult DisarmForTick(const char* code);
+    void ClearSession();
     int ActiveProfileIndexForJoint(int joint_index) const;
     bool BuildServoDegrees(const MotionLiveTarget& target,
                            std::array<int, kPoseJointCount>* servo_degrees,

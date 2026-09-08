@@ -282,13 +282,13 @@ void MotionLiveAdapter::WatchdogTimerCallback(void* arg) {
 }
 
 void MotionLiveAdapter::WatchdogTick() {
-    MotionLiveResult result;
+    MotionLiveTickResult result;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         result = core_.Tick(NowMs());
     }
     if (result.stopped) {
-        ESP_LOGW(TAG, "Live session disarmed by watchdog");
+        ESP_LOGW(TAG, "Live session disarmed by watchdog: %s", result.code);
     }
 }
 

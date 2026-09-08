@@ -686,16 +686,28 @@ MotionLiveResult MotionLiveCore::MakeAck(uint32_t seq, bool should_apply) const 
     return result;
 }
 
-MotionLiveResult MotionLiveCore::DisarmWithError(const char* code, const char* message,
-                                                 bool stopped) {
-    MotionLiveResult result = MakeError(code, message);
-    result.stopped = stopped;
+void MotionLiveCore::ClearSession() {
     armed_ = false;
     owner_socket_ = -1;
     session_id_.clear();
     last_seq_ = 0;
     last_command_ms_ = 0;
     commissioning_servo_index_ = -1;
+}
+
+MotionLiveResult MotionLiveCore::DisarmWithError(const char* code, const char* message,
+                                                 bool stopped) {
+    MotionLiveResult result = MakeError(code, message);
+    result.stopped = stopped;
+    ClearSession();
+    return result;
+}
+
+MotionLiveTickResult MotionLiveCore::DisarmForTick(const char* code) {
+    MotionLiveTickResult result;
+    result.stopped = true;
+    result.code = code == nullptr ? kHardwareApplyFailed : code;
+    ClearSession();
     return result;
 }
 
@@ -1208,40 +1220,31 @@ MotionLiveResult MotionLiveCore::Stop(int owner_socket,
         result.message = "Sequence number is not the next command";
     }
 
-    armed_ = false;
-    owner_socket_ = -1;
-    session_id_.clear();
-    last_seq_ = 0;
-    last_command_ms_ = 0;
+    ClearSession();
     current_speed_dps_ = 0.0;
     fractional_pose_ = commanded_pose_;
     target_pose_ = commanded_pose_;
-    commissioning_servo_index_ = -1;
     return result;
 }
 
-MotionLiveResult MotionLiveCore::Tick(uint64_t now_ms) {
+MotionLiveTickResult MotionLiveCore::Tick(uint64_t now_ms) {
+    MotionLiveTickResult result;
     if (!armed_) {
-        return MakeError(kOk, kOk);
+        return result;
     }
     if (now_ms <= last_command_ms_ ||
         now_ms - last_command_ms_ <= static_cast<uint64_t>(kWatchdogMs)) {
         const char* reason = nullptr;
-        bool hardware_changed = false;
         if (ProfileStepsOnPassiveClock()) {
-            if (!StepTowardTarget(now_ms, &reason, &hardware_changed)) {
-                return DisarmWithError(reason, "Live hardware apply callback failed", true);
+            if (!StepTowardTarget(now_ms, &reason, &result.hardware_changed)) {
+                return DisarmForTick(reason);
             }
         } else if (ProfileResetsMotionClockOnPassiveClock()) {
             last_motion_step_ms_ = now_ms;
         }
-        MotionLiveResult result = MakeAck(last_seq_, hardware_changed);
-        result.ok = false;
-        result.code = kOk;
-        result.message = kOk;
         return result;
     }
-    return DisarmWithError(kWatchdogTimeout, "Live watchdog timed out", true);
+    return DisarmForTick(kWatchdogTimeout);
 }
 
 void MotionLiveCore::OnTransportClosed(int owner_socket) {
