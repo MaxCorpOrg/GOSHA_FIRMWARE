@@ -238,10 +238,29 @@ def validate_adapter(adapter: str, adapter_h: str) -> None:
         'for (int i = 0; i < caps.joint_limit_count; ++i)',
     ):
         require(token in adapter, f"capabilities must report contract field: {token}")
+    for token in (
+        'cJSON_AddBoolToObject(reply, "should_apply", result.should_apply)',
+        'AddServoDegreesObject(reply, "servo_degrees", result.servo_degrees)',
+        'AddServoDegreesObject(reply, "servo_degrees", caps.servo_degrees)',
+        'AddPwmDiagnosticsObject(reply, "pwm_diagnostics", result.pwm_diagnostics)',
+        'AddPwmDiagnosticsObject(reply, "pwm_diagnostics", caps.pwm_diagnostics)',
+        'cJSON_AddStringToObject(item, "id", id)',
+        'cJSON_AddStringToObject(item, "servo_key", kServoSlotKeys[i])',
+        'cJSON_AddStringToObject(item, "joint_id", servo.joint_id)',
+        'cJSON_AddBoolToObject(item, "frequency_available"',
+        'cJSON_AddBoolToObject(item, "duty_available"',
+        'cJSON_AddBoolToObject(item, "last_write_available"',
+        'cJSON_AddBoolToObject(item, "last_write_ok", servo.last_write_ok)',
+        'cJSON_AddBoolToObject(item, "skipped_unattached"',
+        'cJSON_AddItemToObject(object, "servos", servos)',
+    ):
+        require(token in adapter, f"adapter must report PWM diagnostic field: {token}")
     require("limits != nullptr && caps.motion_allowed" not in adapter,
             "capabilities must expose profile limits even while right-arm initialization is required")
     require("MotionLiveRightArmInitializer" in adapter_h,
             "adapter configure API must carry the right-arm initializer callback")
+    require("MotionLivePwmDiagnosticsProvider" in adapter_h,
+            "adapter configure API must carry the PWM diagnostics callback")
     require("MotionLiveJsonSender" in adapter_h and "HandleTransportMessage" in adapter_h,
             "adapter must expose a common transport sender abstraction")
     require("HandleWebSocketMessage" in adapter and "httpd_ws_send_frame" in adapter,
@@ -298,6 +317,10 @@ def validate_core(core: str, core_h: str) -> None:
         "ServoSlot::kLeftHand",
         "ServoSlot::kRightHand",
         "MotionLiveRightArmInitializer",
+        "MotionLivePwmDiagnostics",
+        "MotionLivePwmDiagnosticsProvider",
+        "SetPwmDiagnosticsProvider",
+        "ReadPwmDiagnostics",
         "right_arm_initialized_",
         "right_arm_initialization_failed_",
         "right_arm_initialization_required",
@@ -325,6 +348,10 @@ def validate_core(core: str, core_h: str) -> None:
             "prepared profile storage must have a 5-entry max without changing the six servo slots")
     require("std::array<int, kPoseJointCount> servo_degrees" in core_h,
             "hardware result must address all physical servo slots")
+    require("std::array<MotionLiveServoDiagnostics, kPoseJointCount> servos" in core_h,
+            "PWM diagnostics must address all physical servo slots")
+    require("const char* servo_key" in core_h and "const char* joint_id" in core_h,
+            "PWM diagnostics must report physical servo key and profile joint id separately")
     require("MotionLiveHardwareApplier = std::function<bool(const std::array<int, kPoseJointCount>&)>" in core_h,
             "hardware applier must receive all six physical servo slots")
     require("bool commissioning = false" in core_h,
@@ -411,6 +438,9 @@ def validate_core(core: str, core_h: str) -> None:
             "pose/keepalive must reject expired leases before renewing")
     require("hardware_applier_" in core_h and "ApplyHardware" in core,
             "core must make hardware writes an explicit callback")
+    require("pwm_diagnostics_provider_" in core_h and "ReadPwmDiagnostics()" in core and
+            "profile_->joints[profile_index].servo_index == i" in core,
+            "core must annotate PWM diagnostics with the active profile joint id")
     require("OnTransportClosed" in core and "OnSocketClosed" in core and
             "OnTransportClosed(owner_socket)" in core,
             "core must expose transport-close disarm while preserving WebSocket close API")
@@ -468,6 +498,8 @@ def validate_controller(controller: str, movements: str) -> None:
         "ApplyLiveServoPositions",
         "AttachRightHandAtHome",
         "AttachLegsFeetServos",
+        "GetLiveServoDiagnostics",
+        "pwm_diagnostics_provider",
         "MotionLiveAdapter::GetInstance().ConfigureRuntime(",
         "StartMotionLiveUsbTransport",
         '#include "motion_live_usb_transport.h"',
@@ -505,6 +537,9 @@ def validate_controller(controller: str, movements: str) -> None:
     require("servo_[RIGHT_HAND].Attach" in right_init_body and
             "servo_[RIGHT_HAND].SetPosition(home_degrees)" in right_init_body,
             "right-arm initializer must attach and hold only the right hand")
+    require("if (!servo_[RIGHT_HAND].SetPosition(home_degrees))" in right_init_body and
+            "return false;" in right_init_body,
+            "right-arm initializer must fail closed when neutral PWM write fails")
     require("servo_[LEFT_HAND]" not in right_init_body,
             "right-arm initializer must not touch the left-hand servo object")
     live_apply_body = extract_body(movements, r"bool\s+Otto::ApplyLiveServoPositions\s*\([^)]*\)",
@@ -515,6 +550,9 @@ def validate_controller(controller: str, movements: str) -> None:
             "Live apply must always include only lower body plus the right hand")
     require("servo_[RIGHT_HAND].SetPosition" in live_apply_body,
             "Live apply must be able to command the initialized right hand")
+    require("if (!servo_[i].SetPosition(servo_target[i]))" in live_apply_body and
+            "if (!servo_[RIGHT_HAND].SetPosition(servo_target[RIGHT_HAND]))" in live_apply_body,
+            "Live apply must fail closed when a checked PWM write fails")
     require("servo_[LEFT_HAND].SetPosition" not in live_apply_body,
             "Live apply must never command the left hand")
     set_trims_body = extract_body(movements, r"void\s+Otto::SetTrims\s*\([^)]*\)", "Otto::SetTrims")
@@ -852,9 +890,23 @@ def run_self_test() -> None:
     expect_rejection(
         values,
         "movements",
-        "servo_[RIGHT_HAND].SetPosition(home_degrees);",
-        "servo_[LEFT_HAND].SetPosition(home_degrees);",
+        "if (!servo_[RIGHT_HAND].SetPosition(home_degrees)) {",
+        "if (!servo_[LEFT_HAND].SetPosition(home_degrees)) {",
         "right-arm initializer",
+    )
+    expect_rejection_all(
+        values,
+        "adapter",
+        'AddPwmDiagnosticsObject(reply, "pwm_diagnostics", result.pwm_diagnostics);',
+        "",
+        "PWM diagnostic",
+    )
+    expect_rejection(
+        values,
+        "core",
+        "profile_->joints[profile_index].servo_index == i",
+        "false",
+        "profile joint id",
     )
 
 

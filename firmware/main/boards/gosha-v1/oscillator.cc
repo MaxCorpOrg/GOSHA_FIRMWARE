@@ -38,7 +38,12 @@ Oscillator::Oscillator(int trim) {
     rev_ = false;
 
     pos_ = 90;
+    pin_ = -1;
     previous_millis_ = 0;
+    previous_servo_command_millis_ = 0;
+    ledc_channel_ = LEDC_CHANNEL_0;
+    ledc_speed_mode_ = LEDC_LOW_SPEED_MODE;
+    live_diagnostics_.available = true;
 }
 
 Oscillator::~Oscillator() {
@@ -69,6 +74,12 @@ void Oscillator::Attach(int pin, bool rev) {
 
     pin_ = pin;
     rev_ = rev;
+    live_diagnostics_.available = true;
+    live_diagnostics_.attached = false;
+    live_diagnostics_.pin = pin_;
+    live_diagnostics_.channel = -1;
+    live_diagnostics_.frequency_available = false;
+    live_diagnostics_.duty_available = false;
 
     ledc_timer_config_t ledc_timer = {.speed_mode = LEDC_LOW_SPEED_MODE,
                                       .duty_resolution = LEDC_TIMER_13_BIT,
@@ -91,12 +102,14 @@ void Oscillator::Attach(int pin, bool rev) {
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
 
     ledc_speed_mode_ = LEDC_LOW_SPEED_MODE;
+    live_diagnostics_.channel = static_cast<int>(ledc_channel_);
 
     // pos_ = 90;
     // Write(pos_);
     previous_servo_command_millis_ = millis();
 
     is_attached_ = true;
+    live_diagnostics_.attached = true;
 }
 
 void Oscillator::Detach() {
@@ -106,6 +119,9 @@ void Oscillator::Detach() {
     ESP_ERROR_CHECK(ledc_stop(ledc_speed_mode_, ledc_channel_, 0));
 
     is_attached_ = false;
+    live_diagnostics_.attached = false;
+    live_diagnostics_.frequency_available = false;
+    live_diagnostics_.duty_available = false;
 }
 
 void Oscillator::SetT(unsigned int T) {
@@ -115,8 +131,8 @@ void Oscillator::SetT(unsigned int T) {
     inc_ = 2 * M_PI / number_samples_;
 }
 
-void Oscillator::SetPosition(int position) {
-    Write(position);
+bool Oscillator::SetPosition(int position) {
+    return Write(position);
 }
 
 void Oscillator::Refresh() {
@@ -132,9 +148,41 @@ void Oscillator::Refresh() {
     }
 }
 
-void Oscillator::Write(int position) {
-    if (!is_attached_)
-        return;
+Oscillator::LiveDiagnostics Oscillator::GetLiveDiagnostics() const {
+    LiveDiagnostics diagnostics = live_diagnostics_;
+    diagnostics.available = true;
+    diagnostics.attached = is_attached_;
+    diagnostics.pin = pin_;
+    diagnostics.channel = is_attached_ ? static_cast<int>(ledc_channel_) : -1;
+    diagnostics.frequency_available = false;
+    diagnostics.duty_available = false;
+    if (is_attached_) {
+        diagnostics.frequency_hz = ledc_get_freq(ledc_speed_mode_, LEDC_TIMER_1);
+        diagnostics.frequency_available = diagnostics.frequency_hz != 0;
+        const uint32_t duty = ledc_get_duty(ledc_speed_mode_, ledc_channel_);
+        if (duty != LEDC_ERR_DUTY) {
+            diagnostics.duty = duty;
+            diagnostics.duty_available = true;
+        }
+    }
+    return diagnostics;
+}
+
+bool Oscillator::Write(int position) {
+    live_diagnostics_.available = true;
+    live_diagnostics_.pin = pin_;
+    live_diagnostics_.attached = is_attached_;
+    live_diagnostics_.channel = is_attached_ ? static_cast<int>(ledc_channel_) : -1;
+    live_diagnostics_.last_write_available = true;
+    live_diagnostics_.requested_angle_degrees = position;
+    live_diagnostics_.last_write_ms = millis();
+    live_diagnostics_.last_write_ok = false;
+    live_diagnostics_.skipped_unattached = !is_attached_;
+    live_diagnostics_.frequency_available = false;
+    live_diagnostics_.duty_available = false;
+    if (!is_attached_) {
+        return false;
+    }
 
     long currentMillis = millis();
     if (diff_limit_ > 0) {
@@ -155,7 +203,23 @@ void Oscillator::Write(int position) {
     angle = std::min(std::max(angle, 0), 180);
 
     uint32_t duty = (uint32_t)(((angle / 180.0) * 2.0 + 0.5) * 8191 / 20.0);
+    live_diagnostics_.software_angle_degrees = pos_;
+    live_diagnostics_.applied_angle_degrees = angle;
+    live_diagnostics_.applied_duty = duty;
+    live_diagnostics_.skipped_unattached = false;
 
-    ESP_ERROR_CHECK(ledc_set_duty(ledc_speed_mode_, ledc_channel_, duty));
-    ESP_ERROR_CHECK(ledc_update_duty(ledc_speed_mode_, ledc_channel_));
+    esp_err_t ret = ledc_set_duty(ledc_speed_mode_, ledc_channel_, duty);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "LEDC set duty failed for GPIO%d channel%d: %d",
+                 pin_, static_cast<int>(ledc_channel_), ret);
+        return false;
+    }
+    ret = ledc_update_duty(ledc_speed_mode_, ledc_channel_);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "LEDC update duty failed for GPIO%d channel%d: %d",
+                 pin_, static_cast<int>(ledc_channel_), ret);
+        return false;
+    }
+    live_diagnostics_.last_write_ok = true;
+    return true;
 }

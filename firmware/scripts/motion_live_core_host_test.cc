@@ -9,6 +9,7 @@
 
 using gosha::motion_live::JointIndex;
 using gosha::motion_live::MotionLiveCore;
+using gosha::motion_live::MotionLivePwmDiagnostics;
 using gosha::motion_live::MotionLivePreparedProfile;
 using gosha::motion_live::MotionLiveRuntimeConfig;
 using gosha::motion_live::MotionLiveTarget;
@@ -215,10 +216,17 @@ int main() {
     MotionLiveCore core = ConfiguredCore(&profile, runtime);
     int apply_count = 0;
     std::array<int, kPoseJointCount> last_apply{};
+    MotionLivePwmDiagnostics diagnostic_snapshot;
+    diagnostic_snapshot.servos[Slot(ServoSlot::kLeftLeg)] = {
+        "left_leg", "left_leg", nullptr, true, true, 17, 2, true, 50, true, 614,
+        true, 90, 90, 90, 614, 5000, true, false};
     core.SetHardwareApplier([&](const std::array<int, kPoseJointCount>& target) {
         ++apply_count;
         last_apply = target;
         return true;
+    });
+    core.SetPwmDiagnosticsProvider([&]() {
+        return diagnostic_snapshot;
     });
 
     auto caps = core.GetCapabilities();
@@ -229,6 +237,16 @@ int main() {
     CHECK(caps.joint_limit_count == 4);
     CHECK(caps.max_rate_hz == 20);
     CHECK(std::string(caps.joint_limits[0].id) == "leg_negative_x");
+    CHECK(caps.servo_degrees[Slot(ServoSlot::kLeftLeg)] == 90);
+    CHECK(std::string(caps.pwm_diagnostics.servos[Slot(ServoSlot::kLeftLeg)].id) ==
+          "left_leg");
+    CHECK(std::string(caps.pwm_diagnostics.servos[Slot(ServoSlot::kLeftLeg)].servo_key) ==
+          "left_leg");
+    CHECK(std::string(caps.pwm_diagnostics.servos[Slot(ServoSlot::kLeftLeg)].joint_id) ==
+          "leg_negative_x");
+    CHECK(caps.pwm_diagnostics.servos[Slot(ServoSlot::kLeftLeg)].attached);
+    CHECK(caps.pwm_diagnostics.servos[Slot(ServoSlot::kLeftLeg)].frequency_hz == 50);
+    CHECK(caps.pwm_diagnostics.servos[Slot(ServoSlot::kLeftLeg)].duty == 614);
 
     MotionLivePreparedProfile swapped_profile = ValidProfile(true);
     MotionLiveCore swapped_core = ConfiguredCore(&swapped_profile, ValidRuntime());
@@ -1038,8 +1056,11 @@ int main() {
             45, editor_armed.session_id, 1, RightArmTarget(35, -35, 30, -30, 55), 5,
             120100);
         CHECK(editor_pose.ok);
+        CHECK(!editor_pose.should_apply);
         CHECK(editor_core.IsArmed());
         CHECK(editor_apply_count == 0);
+        CHECK(editor_pose.commanded_pose.relative_degrees[Joint(JointIndex::kArmPositiveX)] ==
+              0.0);
 
         for (uint32_t seq = 2; seq <= 12; ++seq) {
             auto editor_keepalive = editor_core.Keepalive(

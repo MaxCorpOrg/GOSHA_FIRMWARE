@@ -23,6 +23,47 @@ using gosha::motion_live::kMotionLiveUsbPartialTimeoutMs;
 
 namespace {
 
+std::string WorstCaseDiagnosticResponseJson() {
+    std::string json =
+        R"({"protocol":"gosha.motion.live.v1","op":"ack","session_id":")" +
+        std::string(128, 's') +
+        R"(","seq":4294967295,"should_apply":true,)"
+        R"("commanded_pose":{"arm_negative_x":-70,"arm_positive_x":70,)"
+        R"("leg_negative_x":-35,"leg_positive_x":35,)"
+        R"("foot_negative_x":-30,"foot_positive_x":30},)"
+        R"("servo_degrees":{"left_leg":180,"right_leg":180,)"
+        R"("left_foot":180,"right_foot":180,"left_hand":180,"right_hand":180},)"
+        R"("pwm_diagnostics":{"servos":[)";
+    const char* servo_keys[] = {
+        "left_leg", "right_leg", "left_foot", "right_foot", "left_hand", "right_hand",
+    };
+    const char* joint_ids[] = {
+        "leg_negative_x", "leg_positive_x", "foot_negative_x",
+        "foot_positive_x", "arm_negative_x", "arm_positive_x",
+    };
+    for (int i = 0; i < 6; ++i) {
+        if (i > 0) {
+            json.push_back(',');
+        }
+        json += R"({"id":")";
+        json += servo_keys[i];
+        json += R"(","servo_key":")";
+        json += servo_keys[i];
+        json += R"(","joint_id":")";
+        json += joint_ids[i];
+        json +=
+            R"(","available":true,"attached":true,"pin":48,"channel":7,)"
+            R"("frequency_available":true,"freq_hz":50,)"
+            R"("duty_available":true,"duty":4294967295,)"
+            R"("last_write_available":true,"requested_angle":180,)"
+            R"("software_angle":180,"applied_angle":180,)"
+            R"("applied_duty":4294967295,"last_write_ms":18446744073709551615,)"
+            R"("last_write_ok":true,"skipped_unattached":false})";
+    }
+    json += R"(]},"measured_pose":null,"tilt":null})";
+    return json;
+}
+
 MotionLiveUsbFrameStatus FeedString(MotionLiveUsbLineFramer* framer,
                                     const std::string& input,
                                     uint64_t now_ms,
@@ -43,6 +84,10 @@ int main() {
     CHECK(kMotionLiveUsbMaxResponseJsonBytes == 16384);
     CHECK(kMotionLiveUsbMaxResponseFrameBytes ==
           kMotionLiveUsbFramePrefixLength + kMotionLiveUsbMaxResponseJsonBytes + 1);
+    const std::string diagnostic_json = WorstCaseDiagnosticResponseJson();
+    CHECK(diagnostic_json.size() < kMotionLiveUsbMaxResponseJsonBytes);
+    CHECK(kMotionLiveUsbFramePrefixLength + diagnostic_json.size() + 1 <
+          kMotionLiveUsbMaxResponseFrameBytes);
 
     {
         MotionLiveUsbLineFramer framer;

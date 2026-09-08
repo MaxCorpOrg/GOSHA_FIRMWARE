@@ -20,6 +20,11 @@ std::array<LedcChannelState, 8>& MutableChannels() {
     return channels;
 }
 
+std::array<uint32_t, 4>& MutableTimerFrequencies() {
+    static std::array<uint32_t, 4> frequencies;
+    return frequencies;
+}
+
 int64_t& MutableNowUs() {
     static int64_t now_us = 0;
     return now_us;
@@ -36,6 +41,9 @@ void ResetRecorder() {
     MutableEvents().clear();
     for (auto& channel : MutableChannels()) {
         channel = {};
+    }
+    for (auto& frequency : MutableTimerFrequencies()) {
+        frequency = 0;
     }
     MutableNowUs() = 0;
 }
@@ -116,11 +124,26 @@ extern "C" esp_err_t ledc_timer_config(const ledc_timer_config_t* config) {
     if (config == nullptr) {
         return ESP_FAIL;
     }
+    const int timer = static_cast<int>(config->timer_num);
+    auto& frequencies = gosha::motion_pwm_host::MutableTimerFrequencies();
+    if (timer < 0 || timer >= static_cast<int>(frequencies.size())) {
+        return ESP_FAIL;
+    }
+    frequencies[timer] = config->freq_hz;
     gosha::motion_pwm_host::MutableEvents();
     gosha::motion_pwm_host::Events();
     gosha::motion_pwm_host::Record(gosha::motion_pwm_host::LedcEventKind::kTimerConfig,
                                    -999, -1, 0, config->freq_hz);
     return ESP_OK;
+}
+
+extern "C" uint32_t ledc_get_freq(ledc_mode_t, ledc_timer_t timer_num) {
+    const int timer = static_cast<int>(timer_num);
+    auto& frequencies = gosha::motion_pwm_host::MutableTimerFrequencies();
+    if (timer < 0 || timer >= static_cast<int>(frequencies.size())) {
+        return 0;
+    }
+    return frequencies[timer];
 }
 
 extern "C" esp_err_t ledc_channel_config(const ledc_channel_config_t* config) {
@@ -165,6 +188,16 @@ extern "C" esp_err_t ledc_update_duty(ledc_mode_t, ledc_channel_t channel) {
                                    channels[channel_index].gpio_num, channel_index,
                                    channels[channel_index].duty);
     return ESP_OK;
+}
+
+extern "C" uint32_t ledc_get_duty(ledc_mode_t, ledc_channel_t channel) {
+    const int channel_index = static_cast<int>(channel);
+    auto& channels = gosha::motion_pwm_host::MutableChannels();
+    if (channel_index < 0 || channel_index >= static_cast<int>(channels.size()) ||
+        !channels[channel_index].configured) {
+        return LEDC_ERR_DUTY;
+    }
+    return channels[channel_index].duty;
 }
 
 extern "C" esp_err_t ledc_stop(ledc_mode_t, ledc_channel_t channel, uint32_t idle_level) {

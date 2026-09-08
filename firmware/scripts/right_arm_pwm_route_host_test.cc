@@ -10,12 +10,14 @@
 
 using gosha::motion_live::JointIndex;
 using gosha::motion_live::MotionLiveCore;
+using gosha::motion_live::MotionLivePwmDiagnostics;
 using gosha::motion_live::MotionLivePreparedProfile;
 using gosha::motion_live::MotionLiveRuntimeConfig;
 using gosha::motion_live::MotionLiveTarget;
 using gosha::motion_live::ServoSlot;
 using gosha::motion_live::kPoseJointCount;
 using gosha::motion_live::kRightArmHomeDegrees;
+using gosha::motion_live::kServoSlotKeys;
 using gosha::motion_pwm_host::LedcChannelState;
 using gosha::motion_pwm_host::LedcEvent;
 using gosha::motion_pwm_host::LedcEventKind;
@@ -163,6 +165,34 @@ bool EveryLegDutyStayedNeutral() {
     return true;
 }
 
+MotionLivePwmDiagnostics DiagnosticsFromOtto(const Otto& otto) {
+    MotionLivePwmDiagnostics diagnostics;
+    for (int servo_index = 0; servo_index < SERVO_COUNT; ++servo_index) {
+        const auto source = otto.GetLiveServoDiagnostics(servo_index);
+        auto& target = diagnostics.servos[servo_index];
+        target.id = kServoSlotKeys[servo_index];
+        target.servo_key = kServoSlotKeys[servo_index];
+        target.joint_id = nullptr;
+        target.available = source.available;
+        target.attached = source.attached;
+        target.pin = source.pin;
+        target.channel = source.channel;
+        target.frequency_available = source.frequency_available;
+        target.frequency_hz = source.frequency_hz;
+        target.duty_available = source.duty_available;
+        target.duty = source.duty;
+        target.last_write_available = source.last_write_available;
+        target.requested_angle_degrees = source.requested_angle_degrees;
+        target.software_angle_degrees = source.software_angle_degrees;
+        target.applied_angle_degrees = source.applied_angle_degrees;
+        target.applied_duty = source.applied_duty;
+        target.last_write_ms = source.last_write_ms;
+        target.last_write_ok = source.last_write_ok;
+        target.skipped_unattached = source.skipped_unattached;
+    }
+    return diagnostics;
+}
+
 void ConfigureCoreWithOtto(MotionLiveCore* core, MotionLivePreparedProfile* profile,
                            Otto* otto) {
     core->SetLocalOptInEnabled(true);
@@ -181,6 +211,9 @@ void ConfigureCoreWithOtto(MotionLiveCore* core, MotionLivePreparedProfile* prof
             target[Slot(ServoSlot::kRightHand)],
         };
         return otto->ApplyLiveServoPositions(servo_target);
+    });
+    core->SetPwmDiagnosticsProvider([otto]() {
+        return DiagnosticsFromOtto(*otto);
     });
 }
 
@@ -241,10 +274,37 @@ int ExerciseRightArmDutyRoute() {
     CHECK(LatestDutyEquals(kRightHandPin, kDuty135));
     CHECK(AllConfiguredChannelsDistinct(
         {kLeftLegPin, kRightLegPin, kLeftFootPin, kRightFootPin, kRightHandPin}));
+    const auto right_init_diagnostics = otto.GetLiveServoDiagnostics(RIGHT_HAND);
+    CHECK(right_init_diagnostics.available);
+    CHECK(right_init_diagnostics.attached);
+    CHECK(right_init_diagnostics.pin == kRightHandPin);
+    CHECK(right_init_diagnostics.channel ==
+          gosha::motion_pwm_host::ChannelForGpio(kRightHandPin));
+    CHECK(right_init_diagnostics.frequency_available);
+    CHECK(right_init_diagnostics.frequency_hz == 50);
+    CHECK(right_init_diagnostics.duty_available);
+    CHECK(right_init_diagnostics.duty == kDuty135);
+    CHECK(right_init_diagnostics.last_write_available);
+    CHECK(right_init_diagnostics.requested_angle_degrees == kRightArmHomeDegrees);
+    CHECK(right_init_diagnostics.software_angle_degrees == kRightArmHomeDegrees);
+    CHECK(right_init_diagnostics.applied_angle_degrees == kRightArmHomeDegrees);
+    CHECK(right_init_diagnostics.applied_duty == kDuty135);
+    CHECK(right_init_diagnostics.last_write_ok);
+    CHECK(!right_init_diagnostics.skipped_unattached);
 
     const auto caps_after_init = core.GetCapabilities();
     CHECK(caps_after_init.motion_allowed);
     CHECK(caps_after_init.right_arm_initialized);
+    CHECK(caps_after_init.servo_degrees[Slot(ServoSlot::kRightHand)] == kRightArmHomeDegrees);
+    CHECK(caps_after_init.pwm_diagnostics.servos[Slot(ServoSlot::kRightHand)].attached);
+    CHECK(std::string(caps_after_init.pwm_diagnostics.servos[Slot(ServoSlot::kRightHand)].id) ==
+          "right_hand");
+    CHECK(std::string(caps_after_init.pwm_diagnostics.servos[Slot(ServoSlot::kRightHand)].servo_key) ==
+          "right_hand");
+    CHECK(std::string(caps_after_init.pwm_diagnostics.servos[Slot(ServoSlot::kRightHand)].joint_id) ==
+          "arm_positive_x");
+    CHECK(caps_after_init.pwm_diagnostics.servos[Slot(ServoSlot::kRightHand)].duty_available);
+    CHECK(caps_after_init.pwm_diagnostics.servos[Slot(ServoSlot::kRightHand)].duty == kDuty135);
 
     const auto armed = core.Arm(70, profile.calibration_id, true,
                                 "session_right_pwm_route_0001", 100000);
@@ -263,6 +323,11 @@ int ExerciseRightArmDutyRoute() {
         gosha::motion_pwm_host::SetTimeMs(static_cast<int64_t>(now_ms));
         result = core.Pose(70, armed.session_id, seq, RightArmTarget(-5.0), 1.0, now_ms);
         CHECK(result.ok);
+        if (seq == 1) {
+            CHECK(!result.should_apply);
+            CHECK(result.commanded_pose.relative_degrees[Joint(JointIndex::kArmPositiveX)] ==
+                  0.0);
+        }
         CHECK(!gosha::motion_pwm_host::HasAnyEventForGpio(kLeftHandPin));
         CHECK(EveryLegDutyStayedNeutral());
         CHECK(EverySetDutyHasImmediateUpdateForGpio(kRightHandPin));
@@ -296,6 +361,15 @@ int ExerciseRightArmDutyRoute() {
     CHECK(result.commanded_pose.relative_degrees[Joint(JointIndex::kArmPositiveX)] == -5.0);
     CHECK(result.commanded_pose.relative_degrees[Joint(JointIndex::kArmNegativeX)] == 0.0);
     CHECK(LatestDutyEquals(kRightHandPin, kDuty130));
+    const auto right_final_diagnostics = otto.GetLiveServoDiagnostics(RIGHT_HAND);
+    CHECK(right_final_diagnostics.frequency_hz == 50);
+    CHECK(right_final_diagnostics.duty == kDuty130);
+    CHECK(right_final_diagnostics.requested_angle_degrees == 130);
+    CHECK(right_final_diagnostics.software_angle_degrees == 130);
+    CHECK(right_final_diagnostics.applied_angle_degrees == 130);
+    CHECK(right_final_diagnostics.applied_duty == kDuty130);
+    CHECK(result.pwm_diagnostics.servos[Slot(ServoSlot::kRightHand)].last_write_ok);
+    CHECK(result.pwm_diagnostics.servos[Slot(ServoSlot::kRightHand)].duty == kDuty130);
 
     const size_t event_count_before_stop = gosha::motion_pwm_host::Events().size();
     const size_t right_update_count_before_stop =
@@ -369,6 +443,49 @@ int ExerciseWatchdogNoExtraPwm() {
     return 0;
 }
 
+int ExerciseLiveDetachedFailsClosed() {
+    gosha::motion_pwm_host::ResetRecorder();
+    gosha::motion_pwm_host::SetTimeMs(0);
+
+    Otto otto;
+    otto.Init(kLeftLegPin, kRightLegPin, kLeftFootPin, kRightFootPin, -1,
+              kRightHandPin, false);
+    otto.SetTrims(0, 0, 0, 0, 0, 0);
+
+    MotionLivePreparedProfile profile = RightArmCommissioningProfile();
+    MotionLiveCore core;
+    ConfigureCoreWithOtto(&core, &profile, &otto);
+    CHECK(core.InitializeRightArm(72, profile.calibration_id, true).ok);
+
+    const auto armed = core.Arm(72, profile.calibration_id, true,
+                                "session_right_pwm_detached", 300000);
+    CHECK(armed.ok);
+    auto pose = armed;
+    for (uint32_t seq = 1; seq <= 3; ++seq) {
+        const uint64_t now_ms = 300000 + seq * 250;
+        gosha::motion_pwm_host::SetTimeMs(static_cast<int64_t>(now_ms));
+        pose = core.Pose(72, armed.session_id, seq, RightArmTarget(-5.0), 1.0, now_ms);
+        CHECK(pose.ok);
+        CHECK(!pose.should_apply);
+    }
+    gosha::motion_pwm_host::SetTimeMs(301000);
+    pose = core.Pose(72, armed.session_id, 4, RightArmTarget(-5.0), 1.0, 301000);
+    CHECK(!pose.ok);
+    CHECK(pose.stopped);
+    CHECK(std::string(pose.code) == "hardware_apply_failed");
+    CHECK(!core.IsArmed());
+    const auto left_leg_diagnostics = otto.GetLiveServoDiagnostics(LEFT_LEG);
+    CHECK(left_leg_diagnostics.last_write_available);
+    CHECK(!left_leg_diagnostics.last_write_ok);
+    CHECK(left_leg_diagnostics.skipped_unattached);
+    CHECK(!left_leg_diagnostics.attached);
+    CHECK(pose.pwm_diagnostics.servos[Slot(ServoSlot::kLeftLeg)].skipped_unattached);
+    CHECK(!pose.pwm_diagnostics.servos[Slot(ServoSlot::kLeftLeg)].last_write_ok);
+
+    std::cout << "detached route: Live apply fails closed when an oscillator is not attached\n";
+    return 0;
+}
+
 int ExerciseLeftHandFailClosedGuard() {
     gosha::motion_pwm_host::ResetRecorder();
 
@@ -389,6 +506,7 @@ int ExerciseLeftHandFailClosedGuard() {
 int main() {
     CHECK(ExerciseRightArmDutyRoute() == 0);
     CHECK(ExerciseWatchdogNoExtraPwm() == 0);
+    CHECK(ExerciseLiveDetachedFailsClosed() == 0);
     CHECK(ExerciseLeftHandFailClosedGuard() == 0);
     std::cout << "right_arm_pwm_route_host_test: PASS (host LEDC recorder only; no real PWM measured)\n";
     return 0;

@@ -5,6 +5,8 @@
 
 #include "esp_err.h"
 
+#define LEDC_ERR_DUTY 0xFFFFFFFF
+
 enum ledc_mode_t {
     LEDC_LOW_SPEED_MODE = 0,
 };
@@ -62,5 +64,7 @@ extern "C" esp_err_t ledc_set_duty(ledc_mode_t speed_mode, ledc_channel_t channe
 extern "C" esp_err_t ledc_update_duty(ledc_mode_t speed_mode, ledc_channel_t channel);
 extern "C" esp_err_t ledc_stop(ledc_mode_t speed_mode, ledc_channel_t channel,
                                 uint32_t idle_level);
+extern "C" uint32_t ledc_get_freq(ledc_mode_t speed_mode, ledc_timer_t timer_num);
+extern "C" uint32_t ledc_get_duty(ledc_mode_t speed_mode, ledc_channel_t channel);
 
 #endif  // GOSHA_HOST_STUBS_MOTION_PWM_DRIVER_LEDC_H_

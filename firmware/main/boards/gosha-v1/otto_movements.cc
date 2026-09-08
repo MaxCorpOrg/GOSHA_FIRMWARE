@@ -214,7 +214,9 @@ bool Otto::AttachRightHandAtHome(int home_degrees) {
 
     servo_[RIGHT_HAND].Attach(servo_pins_[RIGHT_HAND]);
     servo_[RIGHT_HAND].SetTrim(servo_trim_[RIGHT_HAND]);
-    servo_[RIGHT_HAND].SetPosition(home_degrees);
+    if (!servo_[RIGHT_HAND].SetPosition(home_degrees)) {
+        return false;
+    }
     is_otto_resting_ = false;
     return true;
 }
@@ -238,13 +240,24 @@ bool Otto::ApplyLiveServoPositions(const int servo_target[SERVO_COUNT]) {
     }
 
     for (int i = 0; i < kLegAndFootServoCount; i++) {
-        servo_[i].SetPosition(servo_target[i]);
+        if (!servo_[i].SetPosition(servo_target[i])) {
+            return false;
+        }
     }
     if (servo_pins_[RIGHT_HAND] != -1) {
-        servo_[RIGHT_HAND].SetPosition(servo_target[RIGHT_HAND]);
+        if (!servo_[RIGHT_HAND].SetPosition(servo_target[RIGHT_HAND])) {
+            return false;
+        }
     }
 
     return true;
+}
+
+Oscillator::LiveDiagnostics Otto::GetLiveServoDiagnostics(int servo_number) const {
+    if (servo_number < 0 || servo_number >= SERVO_COUNT) {
+        return {};
+    }
+    return servo_[servo_number].GetLiveDiagnostics();
 }
 
 void Otto::MoveSingle(int position, int servo_number) {

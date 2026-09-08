@@ -207,6 +207,15 @@ const std::array<JointSpec, kPoseJointCount> kJointSpecs = {{
     {"foot_positive_x", "foot", -30, 30, true},
 }};
 
+const std::array<const char*, kPoseJointCount> kServoSlotKeys = {{
+    "left_leg",
+    "right_leg",
+    "left_foot",
+    "right_foot",
+    "left_hand",
+    "right_hand",
+}};
+
 int FindJointIndexById(const char* id) {
     if (id == nullptr) {
         return -1;
@@ -250,6 +259,10 @@ void MotionLiveCore::SetHardwareApplier(MotionLiveHardwareApplier applier) {
 
 void MotionLiveCore::SetRightArmInitializer(MotionLiveRightArmInitializer initializer) {
     right_arm_initializer_ = std::move(initializer);
+}
+
+void MotionLiveCore::SetPwmDiagnosticsProvider(MotionLivePwmDiagnosticsProvider provider) {
+    pwm_diagnostics_provider_ = std::move(provider);
 }
 
 bool MotionLiveCore::ProfileIsCommissioning() const {
@@ -596,6 +609,8 @@ const char* MotionLiveCore::EvaluateSafety() const {
 MotionLiveCapabilities MotionLiveCore::GetCapabilities() const {
     MotionLiveCapabilities caps;
     caps.commanded_pose = commanded_pose_;
+    caps.servo_degrees = commanded_servo_degrees_;
+    caps.pwm_diagnostics = ReadPwmDiagnostics();
 
     const char* reason = kOk;
     if (!ValidateBaseSafety(&reason)) {
@@ -653,6 +668,7 @@ MotionLiveResult MotionLiveCore::MakeError(const char* code, const char* message
     result.seq = last_seq_;
     result.commanded_pose = commanded_pose_;
     result.servo_degrees = commanded_servo_degrees_;
+    result.pwm_diagnostics = ReadPwmDiagnostics();
     return result;
 }
 
@@ -665,6 +681,7 @@ MotionLiveResult MotionLiveCore::MakeAck(uint32_t seq, bool should_apply) const 
     result.seq = seq;
     result.commanded_pose = commanded_pose_;
     result.servo_degrees = commanded_servo_degrees_;
+    result.pwm_diagnostics = ReadPwmDiagnostics();
     result.should_apply = should_apply;
     return result;
 }
@@ -967,6 +984,33 @@ bool MotionLiveCore::ApplyHardware(const std::array<int, kPoseJointCount>& servo
         return false;
     }
     return hardware_applier_(servo_degrees);
+}
+
+MotionLivePwmDiagnostics MotionLiveCore::ReadPwmDiagnostics() const {
+    MotionLivePwmDiagnostics diagnostics;
+    for (int i = 0; i < kPoseJointCount; ++i) {
+        diagnostics.servos[i].id = kServoSlotKeys[i];
+        diagnostics.servos[i].servo_key = kServoSlotKeys[i];
+        diagnostics.servos[i].joint_id = nullptr;
+    }
+    MotionLivePwmDiagnostics provided =
+        pwm_diagnostics_provider_ ? pwm_diagnostics_provider_() : diagnostics;
+    for (int i = 0; i < kPoseJointCount; ++i) {
+        if (provided.servos[i].id == nullptr || provided.servos[i].id[0] == '\0') {
+            provided.servos[i].id = kServoSlotKeys[i];
+        }
+        provided.servos[i].servo_key = kServoSlotKeys[i];
+        provided.servos[i].joint_id = nullptr;
+        if (profile_ != nullptr) {
+            for (int profile_index = 0; profile_index < ProfileJointCount(); ++profile_index) {
+                if (profile_->joints[profile_index].servo_index == i) {
+                    provided.servos[i].joint_id = profile_->joints[profile_index].id;
+                    break;
+                }
+            }
+        }
+    }
+    return provided;
 }
 
 bool MotionLiveCore::InitializeRightArmHardware(int home_degrees) const {

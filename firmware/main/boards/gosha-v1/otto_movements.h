@@ -53,6 +53,7 @@ public:
     bool ApplyLegsFeetPositions(int left_leg, int right_leg, int left_foot, int right_foot);
     bool AttachRightHandAtHome(int home_degrees);
     bool ApplyLiveServoPositions(const int servo_target[SERVO_COUNT]);
+    Oscillator::LiveDiagnostics GetLiveServoDiagnostics(int servo_number) const;
     void MoveSingle(int position, int servo_number);
     void OscillateServos(int amplitude[SERVO_COUNT], int offset[SERVO_COUNT], int period,
                          double phase_diff[SERVO_COUNT], float cycle);

@@ -58,6 +58,7 @@ struct JointSpec {
 };
 
 extern const std::array<JointSpec, kPoseJointCount> kJointSpecs;
+extern const std::array<const char*, kPoseJointCount> kServoSlotKeys;
 
 struct MotionLivePose {
     std::array<double, kPoseJointCount> relative_degrees{};
@@ -119,6 +120,32 @@ struct MotionLiveRuntimeConfig {
     std::array<MotionLiveRuntimeJoint, kPoseJointCount> joints{};
 };
 
+struct MotionLiveServoDiagnostics {
+    const char* id = "";
+    const char* servo_key = "";
+    const char* joint_id = "";
+    bool available = false;
+    bool attached = false;
+    int pin = -1;
+    int channel = -1;
+    bool frequency_available = false;
+    uint32_t frequency_hz = 0;
+    bool duty_available = false;
+    uint32_t duty = 0;
+    bool last_write_available = false;
+    int requested_angle_degrees = 0;
+    int software_angle_degrees = 0;
+    int applied_angle_degrees = 0;
+    uint32_t applied_duty = 0;
+    uint64_t last_write_ms = 0;
+    bool last_write_ok = false;
+    bool skipped_unattached = false;
+};
+
+struct MotionLivePwmDiagnostics {
+    std::array<MotionLiveServoDiagnostics, kPoseJointCount> servos{};
+};
+
 struct MotionLiveCapabilities {
     bool motion_allowed = false;
     const char* reason = "live_profile_unprepared";
@@ -138,6 +165,8 @@ struct MotionLiveCapabilities {
     int joint_limit_count = 0;
     std::array<MotionLiveJointLimit, kMaxActiveJointCount> joint_limits{};
     MotionLivePose commanded_pose{};
+    std::array<int, kPoseJointCount> servo_degrees{};
+    MotionLivePwmDiagnostics pwm_diagnostics{};
 };
 
 struct MotionLiveResult {
@@ -148,12 +177,14 @@ struct MotionLiveResult {
     uint32_t seq = 0;
     MotionLivePose commanded_pose{};
     std::array<int, kPoseJointCount> servo_degrees{};
+    MotionLivePwmDiagnostics pwm_diagnostics{};
     bool should_apply = false;
     bool stopped = false;
 };
 
 using MotionLiveHardwareApplier = std::function<bool(const std::array<int, kPoseJointCount>&)>;
 using MotionLiveRightArmInitializer = std::function<bool(int)>;
+using MotionLivePwmDiagnosticsProvider = std::function<MotionLivePwmDiagnostics()>;
 
 int FindJointIndexById(const char* id);
 
@@ -166,6 +197,7 @@ public:
     void SetRuntimeConfig(const MotionLiveRuntimeConfig& runtime);
     void SetHardwareApplier(MotionLiveHardwareApplier applier);
     void SetRightArmInitializer(MotionLiveRightArmInitializer initializer);
+    void SetPwmDiagnosticsProvider(MotionLivePwmDiagnosticsProvider provider);
 
     MotionLiveCapabilities GetCapabilities() const;
     const char* EvaluateSafety() const;
@@ -224,12 +256,14 @@ private:
     bool StepTowardTarget(uint64_t now_ms, const char** reason, bool* hardware_changed);
     bool ApplyHardware(const std::array<int, kPoseJointCount>& servo_degrees) const;
     bool InitializeRightArmHardware(int home_degrees) const;
+    MotionLivePwmDiagnostics ReadPwmDiagnostics() const;
 
     bool local_opt_in_enabled_ = false;
     const MotionLivePreparedProfile* profile_ = nullptr;
     MotionLiveRuntimeConfig runtime_{};
     MotionLiveHardwareApplier hardware_applier_;
     MotionLiveRightArmInitializer right_arm_initializer_;
+    MotionLivePwmDiagnosticsProvider pwm_diagnostics_provider_;
 
     bool armed_ = false;
     bool right_arm_initialized_ = false;

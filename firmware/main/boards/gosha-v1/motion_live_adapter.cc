@@ -109,6 +109,97 @@ void AddPoseObject(cJSON* parent, const char* name, const MotionLivePose& pose) 
     cJSON_AddItemToObject(parent, name, object);
 }
 
+void AddServoDegreesObject(cJSON* parent,
+                           const char* name,
+                           const std::array<int, kPoseJointCount>& servo_degrees) {
+    cJSON* object = cJSON_CreateObject();
+    if (object == nullptr) {
+        cJSON_AddNullToObject(parent, name);
+        return;
+    }
+    for (int i = 0; i < kPoseJointCount; ++i) {
+        cJSON_AddNumberToObject(object, kServoSlotKeys[i], servo_degrees[i]);
+    }
+    cJSON_AddItemToObject(parent, name, object);
+}
+
+void AddOptionalNumber(cJSON* parent, const char* name, bool available, double value) {
+    if (available) {
+        cJSON_AddNumberToObject(parent, name, value);
+    } else {
+        cJSON_AddNullToObject(parent, name);
+    }
+}
+
+void AddPwmDiagnosticsObject(cJSON* parent,
+                             const char* name,
+                             const MotionLivePwmDiagnostics& diagnostics) {
+    cJSON* object = cJSON_CreateObject();
+    if (object == nullptr) {
+        cJSON_AddNullToObject(parent, name);
+        return;
+    }
+    cJSON* servos = cJSON_CreateArray();
+    if (servos == nullptr) {
+        cJSON_Delete(object);
+        cJSON_AddNullToObject(parent, name);
+        return;
+    }
+    for (int i = 0; i < kPoseJointCount; ++i) {
+        const auto& servo = diagnostics.servos[i];
+        cJSON* item = cJSON_CreateObject();
+        if (item == nullptr) {
+            continue;
+        }
+        const char* id = (servo.id != nullptr && servo.id[0] != '\0')
+                             ? servo.id
+                             : kServoSlotKeys[i];
+        cJSON_AddStringToObject(item, "id", id);
+        cJSON_AddStringToObject(item, "servo_key", kServoSlotKeys[i]);
+        if (servo.joint_id != nullptr && servo.joint_id[0] != '\0') {
+            cJSON_AddStringToObject(item, "joint_id", servo.joint_id);
+        } else {
+            cJSON_AddNullToObject(item, "joint_id");
+        }
+        cJSON_AddBoolToObject(item, "available", servo.available);
+        cJSON_AddBoolToObject(item, "attached", servo.attached);
+        if (servo.pin >= 0) {
+            cJSON_AddNumberToObject(item, "pin", servo.pin);
+        } else {
+            cJSON_AddNullToObject(item, "pin");
+        }
+        if (servo.channel >= 0) {
+            cJSON_AddNumberToObject(item, "channel", servo.channel);
+        } else {
+            cJSON_AddNullToObject(item, "channel");
+        }
+        cJSON_AddBoolToObject(item, "frequency_available",
+                              servo.frequency_available);
+        AddOptionalNumber(item, "freq_hz", servo.frequency_available,
+                          servo.frequency_hz);
+        cJSON_AddBoolToObject(item, "duty_available", servo.duty_available);
+        AddOptionalNumber(item, "duty", servo.duty_available, servo.duty);
+        cJSON_AddBoolToObject(item, "last_write_available",
+                              servo.last_write_available);
+        AddOptionalNumber(item, "requested_angle", servo.last_write_available,
+                          servo.requested_angle_degrees);
+        AddOptionalNumber(item, "software_angle", servo.last_write_ok,
+                          servo.software_angle_degrees);
+        AddOptionalNumber(item, "applied_angle", servo.last_write_ok,
+                          servo.applied_angle_degrees);
+        AddOptionalNumber(item, "applied_duty", servo.last_write_ok,
+                          servo.applied_duty);
+        AddOptionalNumber(item, "last_write_ms", servo.last_write_available,
+                          servo.last_write_ms);
+        cJSON_AddBoolToObject(item, "last_write_ok", servo.last_write_ok);
+        cJSON_AddBoolToObject(item, "skipped_unattached",
+                              servo.skipped_unattached);
+        cJSON_AddItemToArray(servos, item);
+    }
+    cJSON_AddItemToObject(object, "servos", servos);
+    cJSON_AddItemToObject(parent, name, object);
+}
+
 const MotionLivePreparedProfile* PreparedProfileOrNull() {
 #if defined(CONFIG_GOSHA_MOTION_LIVE_LOCAL_OPT_IN) && \
     defined(GOSHA_MOTION_LIVE_PROFILE_HEADER_ENABLED)
@@ -146,7 +237,8 @@ MotionLiveAdapter::MotionLiveAdapter() {
 
 void MotionLiveAdapter::ConfigureRuntime(const MotionLiveRuntimeConfig& runtime,
                                          MotionLiveHardwareApplier applier,
-                                         MotionLiveRightArmInitializer right_arm_initializer) {
+                                         MotionLiveRightArmInitializer right_arm_initializer,
+                                         MotionLivePwmDiagnosticsProvider pwm_diagnostics_provider) {
     MotionLiveRuntimeConfig checked_runtime = runtime;
     checked_runtime.watchdog_tick_ready = EnsureWatchdogTimerStarted();
     {
@@ -154,6 +246,7 @@ void MotionLiveAdapter::ConfigureRuntime(const MotionLiveRuntimeConfig& runtime,
         core_.SetRuntimeConfig(checked_runtime);
         core_.SetHardwareApplier(std::move(applier));
         core_.SetRightArmInitializer(std::move(right_arm_initializer));
+        core_.SetPwmDiagnosticsProvider(std::move(pwm_diagnostics_provider));
     }
 }
 
@@ -327,6 +420,8 @@ esp_err_t MotionLiveAdapter::SendCapabilities(const MotionLiveJsonSender& sender
     }
     cJSON_AddItemToObject(reply, "joint_limits", limits);
     AddPoseObject(reply, "commanded_pose", caps.commanded_pose);
+    AddServoDegreesObject(reply, "servo_degrees", caps.servo_degrees);
+    AddPwmDiagnosticsObject(reply, "pwm_diagnostics", caps.pwm_diagnostics);
     cJSON* feedback = cJSON_CreateObject();
     if (feedback != nullptr) {
         cJSON_AddBoolToObject(feedback, "measured_position", false);
@@ -368,7 +463,10 @@ esp_err_t MotionLiveAdapter::SendAck(const MotionLiveJsonSender& sender,
     cJSON_AddStringToObject(reply, "op", "ack");
     cJSON_AddStringToObject(reply, "session_id", result.session_id.c_str());
     cJSON_AddNumberToObject(reply, "seq", result.seq);
+    cJSON_AddBoolToObject(reply, "should_apply", result.should_apply);
     AddPoseObject(reply, "commanded_pose", result.commanded_pose);
+    AddServoDegreesObject(reply, "servo_degrees", result.servo_degrees);
+    AddPwmDiagnosticsObject(reply, "pwm_diagnostics", result.pwm_diagnostics);
     cJSON_AddNullToObject(reply, "measured_pose");
     cJSON_AddNullToObject(reply, "tilt");
     esp_err_t ret = SendJsonFrame(sender, reply);
@@ -387,7 +485,10 @@ esp_err_t MotionLiveAdapter::SendStopped(const MotionLiveJsonSender& sender,
     cJSON_AddStringToObject(reply, "op", "stopped");
     const std::string& session_id = result.session_id.empty() ? fallback_session_id : result.session_id;
     cJSON_AddStringToObject(reply, "session_id", session_id.c_str());
+    cJSON_AddBoolToObject(reply, "should_apply", result.should_apply);
     AddPoseObject(reply, "commanded_pose", result.commanded_pose);
+    AddServoDegreesObject(reply, "servo_degrees", result.servo_degrees);
+    AddPwmDiagnosticsObject(reply, "pwm_diagnostics", result.pwm_diagnostics);
     cJSON_AddNullToObject(reply, "measured_pose");
     cJSON_AddNullToObject(reply, "tilt");
     esp_err_t ret = SendJsonFrame(sender, reply);

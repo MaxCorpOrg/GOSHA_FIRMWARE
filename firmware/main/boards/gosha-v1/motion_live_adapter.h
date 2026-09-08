@@ -20,7 +20,8 @@ public:
 
     void ConfigureRuntime(const MotionLiveRuntimeConfig& runtime,
                           MotionLiveHardwareApplier applier,
-                          MotionLiveRightArmInitializer right_arm_initializer);
+                          MotionLiveRightArmInitializer right_arm_initializer,
+                          MotionLivePwmDiagnosticsProvider pwm_diagnostics_provider = {});
     bool HandleWebSocketMessage(httpd_req_t* req, cJSON* root);
     bool HandleTransportMessage(int owner_id, cJSON* root,
                                 const MotionLiveJsonSender& sender);

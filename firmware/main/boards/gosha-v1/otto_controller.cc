@@ -618,8 +618,35 @@ private:
         auto right_arm_initializer = [this](int home_degrees) {
             return otto_.AttachRightHandAtHome(home_degrees);
         };
+        auto pwm_diagnostics_provider = [this]() {
+            gosha::motion_live::MotionLivePwmDiagnostics diagnostics;
+            for (int servo_index = 0; servo_index < SERVO_COUNT; ++servo_index) {
+                const auto source = otto_.GetLiveServoDiagnostics(servo_index);
+                auto& target = diagnostics.servos[servo_index];
+                target.id = gosha::motion_live::kServoSlotKeys[servo_index];
+                target.servo_key = gosha::motion_live::kServoSlotKeys[servo_index];
+                target.joint_id = nullptr;
+                target.available = source.available;
+                target.attached = source.attached;
+                target.pin = source.pin;
+                target.channel = source.channel;
+                target.frequency_available = source.frequency_available;
+                target.frequency_hz = source.frequency_hz;
+                target.duty_available = source.duty_available;
+                target.duty = source.duty;
+                target.last_write_available = source.last_write_available;
+                target.requested_angle_degrees = source.requested_angle_degrees;
+                target.software_angle_degrees = source.software_angle_degrees;
+                target.applied_angle_degrees = source.applied_angle_degrees;
+                target.applied_duty = source.applied_duty;
+                target.last_write_ms = source.last_write_ms;
+                target.last_write_ok = source.last_write_ok;
+                target.skipped_unattached = source.skipped_unattached;
+            }
+            return diagnostics;
+        };
         gosha::motion_live::MotionLiveAdapter::GetInstance().ConfigureRuntime(
-            runtime, applier, right_arm_initializer);
+            runtime, applier, right_arm_initializer, pwm_diagnostics_provider);
         gosha::motion_live::StartMotionLiveUsbTransport();
     }
 

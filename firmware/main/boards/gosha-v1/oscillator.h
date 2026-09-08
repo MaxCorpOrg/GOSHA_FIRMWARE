@@ -9,6 +9,8 @@
 #ifndef __OSCILLATOR_H__
 #define __OSCILLATOR_H__
 
+#include <cstdint>
+
 #include "driver/ledc.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -29,6 +31,25 @@
 
 class Oscillator {
 public:
+    struct LiveDiagnostics {
+        bool available = false;
+        bool attached = false;
+        int pin = -1;
+        int channel = -1;
+        bool frequency_available = false;
+        uint32_t frequency_hz = 0;
+        bool duty_available = false;
+        uint32_t duty = 0;
+        bool last_write_available = false;
+        int requested_angle_degrees = 0;
+        int software_angle_degrees = 0;
+        int applied_angle_degrees = 0;
+        uint32_t applied_duty = 0;
+        uint64_t last_write_ms = 0;
+        bool last_write_ok = false;
+        bool skipped_unattached = false;
+    };
+
     Oscillator(int trim = 0);
     ~Oscillator();
     void Attach(int pin, bool rev = false);
@@ -42,16 +63,18 @@ public:
     void SetLimiter(int diff_limit) { diff_limit_ = diff_limit; };
     void DisableLimiter() { diff_limit_ = 0; };
     int GetTrim() { return trim_; };
-    void SetPosition(int position);
+    bool SetPosition(int position);
     void Stop() { stop_ = true; };
     void Play() { stop_ = false; };
     void Reset() { phase_ = 0; };
     void Refresh();
     int GetPosition() { return pos_; }
+    bool IsAttached() const { return is_attached_; }
+    LiveDiagnostics GetLiveDiagnostics() const;
 
 private:
     bool NextSample();
-    void Write(int position);
+    bool Write(int position);
     uint32_t AngleToCompare(int angle);
 
 private:
@@ -86,6 +109,7 @@ private:
 
     ledc_channel_t ledc_channel_;
     ledc_mode_t ledc_speed_mode_;
+    LiveDiagnostics live_diagnostics_;
 };
 
 #endif  // __OSCILLATOR_H__
