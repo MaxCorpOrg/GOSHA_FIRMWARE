@@ -26,6 +26,7 @@ constexpr double kCommissioningJointLimitDegrees = 1.0;
 constexpr double kCommissioningMaxServoRateDps = 1.0;
 constexpr double kCommissioningRightArmJointLimitDegrees = 5.0;
 constexpr double kCommissioningRightArmExtendedJointLimitDegrees = 15.0;
+constexpr double kCommissioningRightArmUpJointLimitDegrees = 70.0;
 constexpr int kMotionLiveUsbOwnerId = -0x47555342;
 
 enum class JointIndex : int {

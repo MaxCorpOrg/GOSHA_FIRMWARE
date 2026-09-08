@@ -285,6 +285,7 @@ def validate_core(core: str, core_h: str) -> None:
         "kCommissioningMaxServoRateDps = 1.0",
         "kCommissioningRightArmJointLimitDegrees = 5.0",
         "kCommissioningRightArmExtendedJointLimitDegrees = 15.0",
+        "kCommissioningRightArmUpJointLimitDegrees = 70.0",
         "kMotionLiveUsbOwnerId = -0x47555342",
         '"leg_negative_x"',
         '"leg_positive_x"',
@@ -333,12 +334,13 @@ def validate_core(core: str, core_h: str) -> None:
             "joint.max_relative_degrees != kCommissioningJointLimitDegrees" in core and
             "joint.max_speed_dps > kCommissioningMaxServoRateDps" in core,
             "commissioning lower-body limits must stay exact and <=1 dps")
-    require("RightArmPreparedExtentDegrees" in core and
-            "right_arm_extent <= 0.0" in core and
+    require("RightArmPreparedRangeFor" in core and
+            "max_session_delta_degrees" in core and
             "joint.direction != 1 ||" in core and
-            "kRightArmHomeDegrees - static_cast<int>(right_arm_extent)" in core and
-            "kRightArmHomeDegrees + static_cast<int>(right_arm_extent)" in core,
-            "right arm must be exact direction +1 and servo home±5 or home±15")
+            "joint.min_servo_degrees != right_arm_range.min_servo_degrees" in core and
+            "joint.max_servo_degrees != right_arm_range.max_servo_degrees" in core and
+            "-kCommissioningRightArmUpJointLimitDegrees" in core,
+            "right arm must be exact direction +1 and one of the approved servo ranges")
     require("ProfileIsCommissioningRightArm() && joint_count != kMaxActiveJointCount" in core and
             "!ProfileIsCommissioningRightArm() && joint_count != kActiveJointCount" in core,
             "new profile must be five joints while old profiles stay four joints")
@@ -362,8 +364,8 @@ def validate_core(core: str, core_h: str) -> None:
     require("std::abs(delta) > max_delta" in core and "changed_count > 1" in core,
             "commissioning modes must reject multi-joint and over-baseline deltas")
     require("slot == static_cast<int>(ServoSlot::kRightHand)" in core and
-            "RightArmPreparedExtentDegrees(joint)" in core and
-            "max_delta = static_cast<int>(right_arm_extent)" in core,
+            "RightArmPreparedRangeFor(joint)" in core and
+            "max_delta = right_arm_range.max_session_delta_degrees" in core,
             "right-arm commissioning must use the prepared profile baseline limit")
     require("commissioning_servo_index_ = changed_slot" in core,
             "commissioning mode must lock the first changed physical joint")
@@ -565,7 +567,8 @@ def validate_prepare(prepare: str) -> None:
         "RIGHT_ARM_HOME_DEGREES = 135",
         "RIGHT_ARM_DEFAULT_LIMIT_DEGREES = 5.0",
         "RIGHT_ARM_EXTENDED_LIMIT_DEGREES = 15.0",
-        "RIGHT_ARM_ALLOWED_LIMIT_DEGREES",
+        "RIGHT_ARM_70_UP_LIMIT_DEGREES = 70.0",
+        "RIGHT_ARM_ALLOWED_RANGES",
         '"right_hand": {"servo_group": "arm", "servo_index": 5, "pin": 12',
         '"left_hand": {"servo_group": "arm", "servo_index": 4, "pin": 8',
         '"arm_positive_x"',
@@ -578,14 +581,16 @@ def validate_prepare(prepare: str) -> None:
         "plaintext access_key was not written",
         "mode must be verified, commissioning or commissioning_right_arm",
         "commissioning limits must be exactly",
-        "right-arm commissioning limits must be exactly [-5,+5] or [-15,+15]",
+        "right-arm commissioning range must be exactly",
+        "[-70,+15]/servo65..150",
         "commissioning max_speed_dps must be <=",
         "arm_positive_x must bind to right_hand slot5 GPIO12",
         "left_hand is unavailable",
         "direction +1",
         "relative -5 commands servo 130",
         "rightHome135",
-        "servo 130..140 or 120..150",
+        "servo130..140",
+        "servo120..150",
         "servo_key must be explicit",
         "servo_key must stay within",
         '"pin": 17',

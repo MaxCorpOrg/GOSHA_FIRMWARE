@@ -99,25 +99,34 @@ reconnect, `hello`, `arm` до init, `keepalive`, STOP или watchdog.
 
 Сохранён текущий right-arm commissioning contract. С 2026-09-08 он
 backward-compatible: старые/default профили остаются на правой руке ±5°,
-а заметный ход ±15° доступен только через явно подготовленный symmetric 15°
-профиль. Автоматического расширения старых профилей нет.
+заметный ход ±15° доступен только через явно подготовленный symmetric 15°
+профиль, а offline candidate для запроса «70° вверх» доступен только как
+явный asymmetric range `[-70,+15]`. Автоматического расширения старых профилей
+нет.
 
 - левая рука недоступна/NC;
 - правая рука: GPIO12, home/neutral 135°;
 - `initialize_right_arm` отдельный, authenticated, запрещён при active session;
 - ноги/ступни: ±1°;
-- правая рука: ровно ±5° (`servo 130..140`) или ровно ±15° (`servo 120..150`);
+- правая рука: ровно ±5° (`servo 130..140`), ровно ±15° (`servo 120..150`)
+  или explicit 70-up candidate `[-70,+15]` (`servo 65..150`);
 - скорость: 1°/с;
 - watchdog: 300 мс;
 - STOP удерживает последний commanded setpoint без Home/detach.
 
-Core validator принимает только фактический prepared extent правой руки 5° или
-15° и требует physical bounds `neutral ± extent`. Ограничение delta внутри
-commissioning-сессии считается от фактического extent текущего профиля, поэтому
-старый ±5° профиль не может выполнить 10° sweep в одной сессии, а явный ±15°
-профиль может выполнить один right-arm шаг до ±15° при 1°/с. UI/API mode
-остаётся `commissioning_right_arm`; `joint_limits` в capabilities отражают
-фактические limits профиля.
+Core validator принимает только фактический prepared range правой руки:
+`[-5,+5]/130..140`, `[-15,+15]/120..150` или `[-70,+15]/65..150`.
+Ограничение delta внутри commissioning-сессии считается от фактического допуска
+текущего range: 5°, 15° или 70° соответственно. Поэтому старый ±5° профиль не
+может выполнить 10° sweep в одной сессии, явный ±15° может выполнить один
+right-arm шаг до ±15° при 1°/с, а candidate `[-70,+15]` может идти из нейтрали
+к −70° или +15°, но не может пройти −70°→+15° как 85° sweep внутри одной
+сессии. UI/API mode остаётся `commissioning_right_arm`; `joint_limits` в
+capabilities отражают фактические limits профиля.
+
+Диапазон `[-70,+15]` является source/profile candidate, а не verified
+механической калибровкой. Его нельзя помечать `calibrated=true` до отдельной
+аппаратной проверки упора, гула, нагрева и видимого направления.
 
 После reboot сохраняется прежнее поведение safe-neutral/right-arm build:
 ноги/ступни 90°, правая рука не инициализирована до отдельного
@@ -132,9 +141,10 @@ commissioning-сессии считается от фактического exte
 - `motion_live_core_host_test.cc`: USB owner против WebSocket owner, чужой STOP,
   explicit USB STOP, watchdog disarm USB-owned session, старый ±5 профиль не
   может выполнить 10° sweep в одной сессии, явный ±15 принимает один right-arm
-  joint при 1°/с и отклоняет speed/multi-joint violations;
+  joint при 1°/с и отклоняет speed/multi-joint violations, candidate
+  `[-70,+15]` идёт к servo65 и servo150 при сохранении one-joint/session gates;
 - `check_gosha_v1_motion_live_profile.py`: opt-in dependencies, shared sender,
   USB parser/driver tokens, console separation, no payload/access-key logging,
-  strict right-arm extents ровно ±5 или ±15;
+  strict right-arm ranges ровно `[-5,+5]`, `[-15,+15]` или `[-70,+15]`;
 - `check_gosha_v1_safe_neutral_boot_profile.py`: checked-in configs не включают
   Live/right-arm/USB флаги по умолчанию.

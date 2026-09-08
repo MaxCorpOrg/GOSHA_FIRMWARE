@@ -28,9 +28,29 @@ COMMISSIONING_MAX_SPEED_DPS = 1.0
 RIGHT_ARM_HOME_DEGREES = 135
 RIGHT_ARM_DEFAULT_LIMIT_DEGREES = 5.0
 RIGHT_ARM_EXTENDED_LIMIT_DEGREES = 15.0
-RIGHT_ARM_ALLOWED_LIMIT_DEGREES = (
-    RIGHT_ARM_DEFAULT_LIMIT_DEGREES,
-    RIGHT_ARM_EXTENDED_LIMIT_DEGREES,
+RIGHT_ARM_70_UP_LIMIT_DEGREES = 70.0
+RIGHT_ARM_ALLOWED_RANGES = (
+    {
+        "relative_min": -RIGHT_ARM_DEFAULT_LIMIT_DEGREES,
+        "relative_max": RIGHT_ARM_DEFAULT_LIMIT_DEGREES,
+        "servo_min": 130,
+        "servo_max": 140,
+        "session_delta": int(RIGHT_ARM_DEFAULT_LIMIT_DEGREES),
+    },
+    {
+        "relative_min": -RIGHT_ARM_EXTENDED_LIMIT_DEGREES,
+        "relative_max": RIGHT_ARM_EXTENDED_LIMIT_DEGREES,
+        "servo_min": 120,
+        "servo_max": 150,
+        "session_delta": int(RIGHT_ARM_EXTENDED_LIMIT_DEGREES),
+    },
+    {
+        "relative_min": -RIGHT_ARM_70_UP_LIMIT_DEGREES,
+        "relative_max": RIGHT_ARM_EXTENDED_LIMIT_DEGREES,
+        "servo_min": 65,
+        "servo_max": 150,
+        "session_delta": int(RIGHT_ARM_70_UP_LIMIT_DEGREES),
+    },
 )
 CALIBRATION_RE = re.compile(r"^[a-f0-9]{64}$")
 
@@ -130,13 +150,19 @@ def require_commissioning_limits(joint_id: str, relative_min: float, relative_ma
             f"{joint_id}: commissioning max_speed_dps must be <= {COMMISSIONING_MAX_SPEED_DPS}")
 
 
-def require_right_arm_commissioning_extent(joint_id: str, relative_min: float,
-                                           relative_max: float) -> float:
-    for extent in RIGHT_ARM_ALLOWED_LIMIT_DEGREES:
-        if relative_min == -extent and relative_max == extent:
-            return extent
+def require_right_arm_commissioning_range(joint_id: str, relative_min: float,
+                                          relative_max: float, servo_min: int,
+                                          servo_max: int) -> dict[str, Any]:
+    for candidate in RIGHT_ARM_ALLOWED_RANGES:
+        if (relative_min == candidate["relative_min"] and
+                relative_max == candidate["relative_max"] and
+                servo_min == candidate["servo_min"] and
+                servo_max == candidate["servo_max"]):
+            return candidate
     raise ProfileError(
-        f"{joint_id}: right-arm commissioning limits must be exactly [-5,+5] or [-15,+15] degrees"
+        f"{joint_id}: right-arm commissioning range must be exactly "
+        "[-5,+5]/servo130..140, [-15,+15]/servo120..150, "
+        "or [-70,+15]/servo65..150"
     )
 
 
@@ -205,14 +231,11 @@ def validate_joint(raw: Any, mode: str) -> dict[str, Any]:
                                      COMMISSIONING_LIMIT_DEGREES)
     if mode == PROFILE_MODE_COMMISSIONING_RIGHT_ARM:
         if joint_id == "arm_positive_x":
-            right_arm_extent = require_right_arm_commissioning_extent(
-                joint_id, relative_min, relative_max
-            )
             require(max_speed <= COMMISSIONING_MAX_SPEED_DPS,
                     f"{joint_id}: commissioning max_speed_dps must be <= {COMMISSIONING_MAX_SPEED_DPS}")
-            require(servo_min == RIGHT_ARM_HOME_DEGREES - int(right_arm_extent) and
-                    servo_max == RIGHT_ARM_HOME_DEGREES + int(right_arm_extent),
-                    "arm_positive_x must stay within servo 130..140 or 120..150 from rightHome135")
+            require_right_arm_commissioning_range(
+                joint_id, relative_min, relative_max, servo_min, servo_max
+            )
         else:
             require_commissioning_limits(joint_id, relative_min, relative_max, max_speed,
                                          COMMISSIONING_LIMIT_DEGREES)
@@ -354,7 +377,7 @@ def load_json(path: Path) -> Any:
 
 
 def lower_body_sample(mode: str,
-                      right_arm_extent: float = RIGHT_ARM_DEFAULT_LIMIT_DEGREES) -> dict[str, Any]:
+                      right_arm_range: dict[str, Any] | None = None) -> dict[str, Any]:
     sample = {
         "profile_id": PROFILE_ID,
         "mode": mode,
@@ -384,6 +407,7 @@ def lower_body_sample(mode: str,
             joint["servo_max_degrees"] = 91
             joint["max_speed_dps"] = 1
     if mode == PROFILE_MODE_COMMISSIONING_RIGHT_ARM:
+        right_arm_range = right_arm_range or RIGHT_ARM_ALLOWED_RANGES[0]
         sample["joints"].append({
             "id": "arm_positive_x",
             "servo_key": "right_hand",
@@ -392,10 +416,10 @@ def lower_body_sample(mode: str,
             "trim": 0,
             "neutral_degrees": RIGHT_ARM_HOME_DEGREES,
             "direction": 1,
-            "min": -right_arm_extent,
-            "max": right_arm_extent,
-            "servo_min_degrees": RIGHT_ARM_HOME_DEGREES - int(right_arm_extent),
-            "servo_max_degrees": RIGHT_ARM_HOME_DEGREES + int(right_arm_extent),
+            "min": right_arm_range["relative_min"],
+            "max": right_arm_range["relative_max"],
+            "servo_min_degrees": right_arm_range["servo_min"],
+            "servo_max_degrees": right_arm_range["servo_max"],
             "max_speed_dps": 1,
         })
     return sample
@@ -452,7 +476,7 @@ def run_self_test() -> None:
             "right-arm header leaked plaintext access_key")
 
     right_arm_15 = lower_body_sample(PROFILE_MODE_COMMISSIONING_RIGHT_ARM,
-                                     RIGHT_ARM_EXTENDED_LIMIT_DEGREES)
+                                     RIGHT_ARM_ALLOWED_RANGES[1])
     right_arm_15_profile = validate_profile(right_arm_15)
     right_15_header = render_header(right_arm_15_profile)
     require('{"arm_positive_x", "right_hand", 5, 12, 0, 135, 1, -15.0, 15.0, 120, 150, 1.0}' in right_15_header,
@@ -461,6 +485,18 @@ def run_self_test() -> None:
             "right-arm 15-degree range must change the computed calibration_id")
     require("LiveKey-20260906-Q4bz!" not in right_15_header,
             "right-arm 15-degree header leaked plaintext access_key")
+
+    right_arm_70_up = lower_body_sample(PROFILE_MODE_COMMISSIONING_RIGHT_ARM,
+                                        RIGHT_ARM_ALLOWED_RANGES[2])
+    right_arm_70_up_profile = validate_profile(right_arm_70_up)
+    right_70_up_header = render_header(right_arm_70_up_profile)
+    require('{"arm_positive_x", "right_hand", 5, 12, 0, 135, 1, -70.0, 15.0, 65, 150, 1.0}' in right_70_up_header,
+            "right-arm 70-up header did not bind servo 65..150 from rightHome135")
+    require(right_arm_70_up_profile["calibration_id"] not in {
+        right_arm_profile["calibration_id"], right_arm_15_profile["calibration_id"]},
+        "right-arm 70-up range must change the computed calibration_id")
+    require("LiveKey-20260906-Q4bz!" not in right_70_up_header,
+            "right-arm 70-up header leaked plaintext access_key")
 
     bad_commissioning_range = json.loads(json.dumps(commissioning))
     bad_commissioning_range["joints"][0]["max"] = 2
@@ -503,23 +539,42 @@ def run_self_test() -> None:
     bad_right_range["joints"][-1]["max"] = 10
     bad_right_range["joints"][-1]["servo_min_degrees"] = 125
     bad_right_range["joints"][-1]["servo_max_degrees"] = 145
-    expect_rejection(bad_right_range, "right-arm commissioning limits")
+    expect_rejection(bad_right_range, "right-arm commissioning range")
 
     bad_right_too_wide = json.loads(json.dumps(right_arm))
     bad_right_too_wide["joints"][-1]["min"] = -16
     bad_right_too_wide["joints"][-1]["max"] = 16
     bad_right_too_wide["joints"][-1]["servo_min_degrees"] = 119
     bad_right_too_wide["joints"][-1]["servo_max_degrees"] = 151
-    expect_rejection(bad_right_too_wide, "right-arm commissioning limits")
+    expect_rejection(bad_right_too_wide, "right-arm commissioning range")
 
     bad_right_asymmetric = json.loads(json.dumps(right_arm_15))
     bad_right_asymmetric["joints"][-1]["min"] = -5
     bad_right_asymmetric["joints"][-1]["servo_min_degrees"] = 130
-    expect_rejection(bad_right_asymmetric, "right-arm commissioning limits")
+    expect_rejection(bad_right_asymmetric, "right-arm commissioning range")
 
     bad_right_15_bounds = json.loads(json.dumps(right_arm_15))
     bad_right_15_bounds["joints"][-1]["servo_min_degrees"] = 119
-    expect_rejection(bad_right_15_bounds, "servo 130..140 or 120..150")
+    expect_rejection(bad_right_15_bounds, "right-arm commissioning range")
+
+    bad_right_70_down = json.loads(json.dumps(right_arm_70_up))
+    bad_right_70_down["joints"][-1]["max"] = 70
+    bad_right_70_down["joints"][-1]["servo_max_degrees"] = 180
+    expect_rejection(bad_right_70_down, "relative mapping leaves")
+
+    bad_right_70_full_servo = json.loads(json.dumps(right_arm_70_up))
+    bad_right_70_full_servo["joints"][-1]["max"] = 45
+    bad_right_70_full_servo["joints"][-1]["servo_max_degrees"] = 180
+    expect_rejection(bad_right_70_full_servo, "right-arm commissioning range")
+
+    bad_right_70_upper = json.loads(json.dumps(right_arm_70_up))
+    bad_right_70_upper["joints"][-1]["max"] = 16
+    bad_right_70_upper["joints"][-1]["servo_max_degrees"] = 151
+    expect_rejection(bad_right_70_upper, "right-arm commissioning range")
+
+    bad_right_70_bounds = json.loads(json.dumps(right_arm_70_up))
+    bad_right_70_bounds["joints"][-1]["servo_min_degrees"] = 64
+    expect_rejection(bad_right_70_bounds, "right-arm commissioning range")
 
     bad_right_speed = json.loads(json.dumps(right_arm))
     bad_right_speed["joints"][-1]["max_speed_dps"] = 2

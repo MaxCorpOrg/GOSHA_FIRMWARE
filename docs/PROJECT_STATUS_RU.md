@@ -1,5 +1,33 @@
 # PROJECT STATUS
 
+## Right-arm 70° up commissioning candidate — 2026-09-08
+
+Статус: offline candidate, готово, не установлено. По продолжению задачи
+владельца подготовлен source-кандидат для формулировки «70 градусов вверх»
+без признания этого диапазона mechanically verified или calibrated. Режим остаётся
+`commissioning_right_arm`, `commissioning=true`, `calibrated=false`; старые
+правые диапазоны `[-5,+5]` (`servo 130..140`) и `[-15,+15]` (`servo 120..150`)
+сохраняются без авторасширения. Новый кандидат принимается только явно как
+`arm_positive_x -> right_hand`, GPIO12, `neutral_degrees=135`, `direction=+1`,
+relative `[-70,+15]`, physical servo `65..150`, `max_speed_dps=1`. Левая рука
+остаётся NC, ноги/ступни остаются strict `[-1,+1]` при `1°/с`, watchdog 300 мс.
+
+Core теперь использует явный right-arm range helper, а не только symmetric extent.
+Для commissioning session delta считается по фактическому допуску range: старый
+`±5` остаётся 5°, старый `±15` остаётся 15°, новый candidate `[-70,+15]` имеет
+per-session delta 70°. Поэтому из нейтрали можно отдельной сессией идти к −70°
+(`servo65`) или к +15° (`servo150`), но sweep от −70° до +15° в одной сессии
+отклоняется как 85° от baseline. One-joint, authenticated ARM,
+`initialize_right_arm` exact-once/failed latch, PWM only POSE, STOP без Home/detach
+и no-motion/OTA/reboot/assets gates не менялись.
+
+Это только offline source-кандидат под будущий private profile/header/build.
+ESP-IDF build, USB, сеть робота, flash, чтение owner-local profile key и
+аппаратные команды не выполнялись. Перед установкой и физическим движением нужен
+актуальный owner/root hardware gate: текущая поза/опора, доступ к питанию,
+готовность остановить при упоре/гуле/нагреве. Диапазон 70° нельзя помечать
+verified до отдельного механического наблюдения.
+
 ## 2026-09-08: профиль правой руки ±15° установлен
 
 По свежему подтверждению владельца установлен app из `b8db96f624824821f49e9ca6a4f60a64286d12da`,

@@ -94,14 +94,20 @@ GOSHA_OTA_URL='https://maintenance.invalid/firmware/' \
 `arm_positive_x -> right_hand`, slot 5, GPIO12, `neutral_degrees=135`,
 `direction=+1`. Правая рука в этом режиме принимает ровно symmetric ±5°
 (`servo 130..140`) или явно заданный symmetric ±15° (`servo 120..150`);
-default/sample остаются ±5°. Ноги/ступни остаются strict ±1°, левая рука
-остаётся NC, скорость для commissioning — 1°/с.
+default/sample остаются ±5°. Offline candidate под запрос «70° вверх» добавляет
+только явный asymmetric range `[-70,+15]` (`servo 65..150`); он остаётся
+commissioning-кандидатом, а не verified/calibrated диапазоном. Ноги/ступни
+остаются strict ±1°, левая рука остаётся NC, скорость для commissioning —
+1°/с.
 
 Внутри одной сессии фиксируется начальная applied-поза и первый физический
 канал, который отличается от неё. До STOP или watchdog другой физический канал
 двигать нельзя даже после возврата первого в baseline; переход дальше чем на
 фактический extent профиля от baseline также отклоняется: для lower-body это
-1°, для старого right-arm ±5° это 5°, для явного right-arm ±15° это 15°.
+1°, для старого right-arm ±5° это 5°, для явного right-arm ±15° это 15°,
+для candidate `[-70,+15]` это 70°. Поэтому candidate может идти из нейтрали
+к −70° или +15°, но не может пройти −70°→+15° как один 85° sweep внутри той же
+сессии.
 Профиль всё равно требует локальный access key, generated header вне Git,
 совпадение pin/trim/neutral с runtime и те же no-motion/safe-neutral guards.
 
