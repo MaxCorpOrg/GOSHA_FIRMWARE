@@ -80,6 +80,11 @@ void Protocol::SendMcpMessage(const std::string& payload) {
     SendText(message);
 }
 
+void Protocol::SendMotionLiveMessage(const std::string& payload) {
+    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"motion_live\",\"payload\":" + payload + "}";
+    SendText(message);
+}
+
 void Protocol::AddAudioParams(cJSON* root, int frame_duration_ms) const {
     auto codec = Board::GetInstance().GetAudioCodec();
     const int output_sample_rate =

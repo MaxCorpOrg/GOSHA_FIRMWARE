@@ -46,7 +46,7 @@ constexpr size_t kUsbDriverTxBufferBytes = kMotionLiveUsbMaxResponseFrameBytes;
 constexpr size_t kUsbReadChunkBytes = 128;
 constexpr TickType_t kUsbReadWaitTicks = pdMS_TO_TICKS(20);
 constexpr TickType_t kUsbWriteWaitTicks = pdMS_TO_TICKS(20);
-constexpr uint64_t kUsbWriteBudgetMs = 100;
+constexpr uint64_t kUsbWriteBudgetMs = 2000;
 constexpr uint32_t kUsbTaskStackBytes = 6144;
 constexpr UBaseType_t kUsbTaskPriority = 5;
 

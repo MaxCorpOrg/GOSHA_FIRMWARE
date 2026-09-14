@@ -10,6 +10,7 @@
 #include <mutex>
 #include <deque>
 #include <memory>
+#include <atomic>
 
 #include "protocol.h"
 #include "ota.h"
@@ -132,6 +133,11 @@ private:
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
+    std::atomic<uint32_t> protocol_generation_{0};
+    std::mutex voice_motion_live_mutex_;
+    std::atomic<int> voice_motion_live_owner_id_{0};
+    std::atomic<uint32_t> voice_motion_live_generation_{0};
+    int next_voice_motion_live_owner_id_ = -0x47564f49;
     std::string last_error_message_;
     AudioService audio_service_;
     std::unique_ptr<Ota> ota_;
@@ -154,6 +160,22 @@ private:
     void HandleActivationDoneEvent();
     void HandleWakeWordDetectedEvent();
     void ContinueOpenAudioChannel(ListeningMode mode);
+    void BeginVoiceMotionLiveOwner();
+    void RetireVoiceMotionLiveOwner();
+    void RetireVoiceMotionLiveOwnerLocked();
+    void SendMotionLiveMessageForOwner(std::string payload,
+                                       int expected_owner_id,
+                                       uint32_t expected_voice_generation,
+                                       uint32_t expected_protocol_generation,
+                                       Protocol* expected_protocol,
+                                       bool require_active_owner = true);
+    void SendMotionLiveErrorForOwner(const char* code,
+                                     const char* message,
+                                     int expected_owner_id,
+                                     uint32_t expected_voice_generation,
+                                     uint32_t expected_protocol_generation,
+                                     Protocol* expected_protocol,
+                                     cJSON* request = nullptr);
     void ContinueWakeWordInvoke(const std::string& wake_word);
 
     // Activation task (runs in background)

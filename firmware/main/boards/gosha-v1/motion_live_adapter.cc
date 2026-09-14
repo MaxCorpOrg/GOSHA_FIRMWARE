@@ -3,6 +3,7 @@
 
 #include <esp_log.h>
 #include <esp_random.h>
+#include <esp_system.h>
 #include <esp_timer.h>
 #include <mbedtls/md.h>
 
@@ -25,6 +26,43 @@ namespace {
 
 constexpr const char* TAG = "MotionLive";
 constexpr int64_t kWatchdogTickPeriodUs = 50 * 1000;
+
+const char* ResetReasonName(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_POWERON:
+            return "poweron";
+        case ESP_RST_EXT:
+            return "external";
+        case ESP_RST_SW:
+            return "software";
+        case ESP_RST_PANIC:
+            return "panic";
+        case ESP_RST_INT_WDT:
+            return "interrupt_watchdog";
+        case ESP_RST_TASK_WDT:
+            return "task_watchdog";
+        case ESP_RST_WDT:
+            return "watchdog";
+        case ESP_RST_DEEPSLEEP:
+            return "deepsleep";
+        case ESP_RST_BROWNOUT:
+            return "brownout";
+        case ESP_RST_SDIO:
+            return "sdio";
+        case ESP_RST_USB:
+            return "usb";
+        case ESP_RST_JTAG:
+            return "jtag";
+        case ESP_RST_EFUSE:
+            return "efuse";
+        case ESP_RST_PWR_GLITCH:
+            return "power_glitch";
+        case ESP_RST_CPU_LOCKUP:
+            return "cpu_lockup";
+        default:
+            return "unknown";
+    }
+}
 
 bool JsonStringEquals(cJSON* item, const char* value) {
     return item != nullptr && cJSON_IsString(item) && item->valuestring != nullptr &&
@@ -223,6 +261,41 @@ const char* PreparedAccessKeyHashOrNull() {
     return profile == nullptr ? nullptr : profile->access_key_sha256;
 }
 
+bool IsPackageProtocolOp(const char* op) {
+    return op != nullptr &&
+           (std::strcmp(op, "package_upload_begin") == 0 ||
+            std::strcmp(op, "package_upload_chunk") == 0 ||
+            std::strcmp(op, "package_upload_finish") == 0 ||
+            std::strcmp(op, "package_upload_abort") == 0 ||
+            std::strcmp(op, "package_list") == 0 ||
+            std::strcmp(op, "package_load") == 0 ||
+            std::strcmp(op, "package_select") == 0 ||
+            std::strcmp(op, "package_prepare") == 0 ||
+            std::strcmp(op, "package_sample") == 0 ||
+            std::strcmp(op, "package_run_start") == 0 ||
+            std::strcmp(op, "package_run_status") == 0 ||
+            std::strcmp(op, "package_run_stop") == 0 ||
+            std::strcmp(op, "package_hardware_run_start") == 0 ||
+            std::strcmp(op, "package_hardware_run_status") == 0 ||
+            std::strcmp(op, "package_hardware_run_stop") == 0 ||
+            std::strcmp(op, "package_delete") == 0);
+}
+
+bool IsPackageHardwareRunFollowupOp(const char* op) {
+    return op != nullptr &&
+           (std::strcmp(op, "package_hardware_run_status") == 0 ||
+            std::strcmp(op, "package_hardware_run_stop") == 0);
+}
+
+bool IsLiveMotionOp(const char* op) {
+    return op != nullptr &&
+           (std::strcmp(op, "initialize_right_arm") == 0 ||
+            std::strcmp(op, "arm") == 0 ||
+            std::strcmp(op, "pose") == 0 ||
+            std::strcmp(op, "keepalive") == 0 ||
+            std::strcmp(op, "stop") == 0);
+}
+
 }  // namespace
 
 MotionLiveAdapter& MotionLiveAdapter::GetInstance() {
@@ -230,7 +303,12 @@ MotionLiveAdapter& MotionLiveAdapter::GetInstance() {
     return instance;
 }
 
-MotionLiveAdapter::MotionLiveAdapter() {
+MotionLiveAdapter::MotionLiveAdapter()
+    : package_manager_(&package_store_backend_),
+      package_protocol_(&package_manager_, &package_player_, &package_runner_,
+                        &package_hardware_runner_,
+                        [this]() { return GenerateSessionId(); },
+                        [this]() { return NowMs(); }) {
     core_.SetLocalOptInEnabled(LocalOptInEnabled());
     core_.SetPreparedProfile(PreparedProfileOrNull());
 }
@@ -285,9 +363,13 @@ void MotionLiveAdapter::WatchdogTick() {
     MotionLiveTickResult result;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        result = core_.Tick(NowMs());
+        const uint64_t now_ms = NowMs();
+        package_protocol_.TickHardwareRun(&core_, now_ms);
+        result = core_.Tick(now_ms);
     }
     if (result.stopped) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        package_protocol_.OnLiveSessionStopped();
         ESP_LOGW(TAG, "Live session disarmed by watchdog: %s", result.code);
     }
 }
@@ -393,9 +475,24 @@ esp_err_t MotionLiveAdapter::SendCapabilities(const MotionLiveJsonSender& sender
     cJSON_AddNumberToObject(reply, "watchdog_ms", caps.watchdog_ms);
     cJSON_AddNumberToObject(reply, "max_rate_hz", caps.max_rate_hz);
     cJSON_AddBoolToObject(reply, "auth_required", caps.auth_required);
+    const esp_reset_reason_t reset_reason = esp_reset_reason();
+    cJSON_AddStringToObject(reply, "last_reset_reason",
+                            ResetReasonName(reset_reason));
+    cJSON_AddNumberToObject(reply, "last_reset_reason_code",
+                            static_cast<int>(reset_reason));
     cJSON_AddBoolToObject(reply, "initialization_required", caps.initialization_required);
     cJSON_AddBoolToObject(reply, "right_arm_available", caps.right_arm_available);
     cJSON_AddBoolToObject(reply, "right_arm_initialized", caps.right_arm_initialized);
+    cJSON* package_features = cJSON_CreateObject();
+    if (package_features != nullptr) {
+        cJSON_AddNumberToObject(package_features, "store_slots", 2);
+        cJSON_AddBoolToObject(package_features, "list", true);
+        cJSON_AddBoolToObject(package_features, "select", true);
+        cJSON_AddBoolToObject(package_features, "delete_all", true);
+        cJSON_AddBoolToObject(package_features, "delete_by_id", true);
+        cJSON_AddBoolToObject(package_features, "hardware_run", true);
+        cJSON_AddItemToObject(reply, "package_features", package_features);
+    }
     if (caps.initialization_op != nullptr && caps.initialization_op[0] != '\0') {
         cJSON_AddStringToObject(reply, "initialization_op", caps.initialization_op);
     }
@@ -533,6 +630,50 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
     }
 
     const char* op = op_item->valuestring;
+    cJSON* key = cJSON_GetObjectItem(root, "access_key");
+    const bool access_ok =
+        cJSON_IsString(key) && key->valuestring != nullptr && AccessKeyMatches(key->valuestring);
+
+    if (IsPackageProtocolOp(op)) {
+        cJSON* package_reply = nullptr;
+        bool package_blocked_while_armed = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (core_.IsArmed() && !IsPackageHardwareRunFollowupOp(op)) {
+                package_blocked_while_armed = true;
+            } else {
+                package_protocol_.HandleMessage(
+                    root, owner_id, PreparedProfileOrNull(), &core_,
+                    access_ok, &package_reply);
+            }
+        }
+        if (package_blocked_while_armed) {
+            SendError(sender, root, "package_live_session_active",
+                      "Motion package operations are disabled while a Live session is armed");
+            return true;
+        }
+        if (package_reply != nullptr) {
+            SendJsonFrame(sender, package_reply);
+            cJSON_Delete(package_reply);
+        } else {
+            SendError(sender, root, "internal_error",
+                      "Motion package response could not be created");
+        }
+        return true;
+    }
+
+    if (IsLiveMotionOp(op)) {
+        bool package_run_active = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            package_run_active = package_protocol_.run_active();
+        }
+        if (package_run_active) {
+            SendError(sender, root, "package_run_active",
+                      "Live motion is disabled while a stored package run is active");
+            return true;
+        }
+    }
 
     if (std::strcmp(op, "hello") == 0) {
         MotionLiveCapabilities caps;
@@ -553,14 +694,14 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
                       "Live initialize_right_arm requires request_id and calibration_id");
             return true;
         }
-        cJSON* key = cJSON_GetObjectItem(root, "access_key");
-        const bool access_ok =
-            cJSON_IsString(key) && key->valuestring != nullptr && AccessKeyMatches(key->valuestring);
+        const bool init_access_ok =
+            cJSON_IsString(key) && key->valuestring != nullptr &&
+            AccessKeyMatches(key->valuestring);
         MotionLiveResult result;
         MotionLiveCapabilities caps;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = core_.InitializeRightArm(owner_id, calibration_id, access_ok);
+            result = core_.InitializeRightArm(owner_id, calibration_id, init_access_ok);
             if (result.ok) {
                 caps = core_.GetCapabilities();
             }
@@ -579,9 +720,6 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
             SendError(sender, root, "bad_json", "Live calibration_id is required");
             return true;
         }
-        cJSON* key = cJSON_GetObjectItem(root, "access_key");
-        const bool access_ok =
-            cJSON_IsString(key) && key->valuestring != nullptr && AccessKeyMatches(key->valuestring);
         MotionLiveResult result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -667,6 +805,7 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
 void MotionLiveAdapter::OnTransportClosed(int owner_id) {
     std::lock_guard<std::mutex> lock(mutex_);
     core_.OnTransportClosed(owner_id);
+    package_protocol_.OnTransportClosed(owner_id);
 }
 
 void MotionLiveAdapter::OnSocketClosed(int socket_fd) {

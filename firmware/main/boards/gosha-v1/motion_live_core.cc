@@ -1120,6 +1120,47 @@ MotionLiveResult MotionLiveCore::Arm(int owner_socket,
     return result;
 }
 
+const char* MotionLiveCore::ArmForPackageHardwareRun(
+    int owner_socket,
+    const std::string& request_calibration_id,
+    bool access_key_valid,
+    const std::string& new_session_id,
+    uint64_t now_ms,
+    std::string* accepted_session_id) {
+    if (armed_) {
+        return kSessionBusy;
+    }
+    const char* reason = EvaluateSafety();
+    if (!Streq(reason, kOk)) {
+        return reason;
+    }
+    if (request_calibration_id != profile_->calibration_id) {
+        return kProfileMismatch;
+    }
+    if (!access_key_valid) {
+        return kAuthFailed;
+    }
+    if (new_session_id.size() < 16 || new_session_id.size() > 128) {
+        return kProfileMismatch;
+    }
+
+    armed_ = true;
+    owner_socket_ = owner_socket;
+    session_id_ = new_session_id;
+    last_seq_ = 0;
+    last_command_ms_ = now_ms;
+    last_motion_step_ms_ = now_ms;
+    current_speed_dps_ = 0.0;
+    fractional_pose_ = commanded_pose_;
+    target_pose_ = commanded_pose_;
+    session_initial_servo_degrees_ = commanded_servo_degrees_;
+    commissioning_servo_index_ = -1;
+    if (accepted_session_id != nullptr) {
+        *accepted_session_id = session_id_;
+    }
+    return kOk;
+}
+
 MotionLiveResult MotionLiveCore::Pose(int owner_socket,
                                       const std::string& session_id,
                                       uint32_t seq,
@@ -1225,6 +1266,27 @@ MotionLiveResult MotionLiveCore::Stop(int owner_socket,
     fractional_pose_ = commanded_pose_;
     target_pose_ = commanded_pose_;
     return result;
+}
+
+const char* MotionLiveCore::StopForPackageHardwareRun(
+    int owner_socket,
+    const std::string& session_id,
+    uint32_t seq,
+    uint32_t* accepted_seq) {
+    const char* reason = nullptr;
+    if (!ValidateOwnerSession(owner_socket, session_id, &reason)) {
+        return reason;
+    }
+
+    const bool seq_ok = ValidateNextSeq(seq, &reason);
+    if (accepted_seq != nullptr) {
+        *accepted_seq = seq_ok ? seq : last_seq_;
+    }
+    ClearSession();
+    current_speed_dps_ = 0.0;
+    fractional_pose_ = commanded_pose_;
+    target_pose_ = commanded_pose_;
+    return seq_ok ? kOk : kBadSeq;
 }
 
 MotionLiveTickResult MotionLiveCore::Tick(uint64_t now_ms) {

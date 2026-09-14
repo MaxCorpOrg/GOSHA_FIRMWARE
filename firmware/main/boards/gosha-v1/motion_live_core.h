@@ -211,6 +211,12 @@ public:
     MotionLiveResult Arm(int owner_socket, const std::string& request_calibration_id,
                          bool access_key_valid, const std::string& new_session_id,
                          uint64_t now_ms);
+    const char* ArmForPackageHardwareRun(int owner_socket,
+                                         const std::string& request_calibration_id,
+                                         bool access_key_valid,
+                                         const std::string& new_session_id,
+                                         uint64_t now_ms,
+                                         std::string* accepted_session_id);
     MotionLiveResult InitializeRightArm(int owner_socket,
                                         const std::string& request_calibration_id,
                                         bool access_key_valid);
@@ -219,6 +225,10 @@ public:
     MotionLiveResult Keepalive(int owner_socket, const std::string& session_id, uint32_t seq,
                                uint64_t now_ms);
     MotionLiveResult Stop(int owner_socket, const std::string& session_id, uint32_t seq);
+    const char* StopForPackageHardwareRun(int owner_socket,
+                                          const std::string& session_id,
+                                          uint32_t seq,
+                                          uint32_t* accepted_seq);
     MotionLiveTickResult Tick(uint64_t now_ms);
     void OnTransportClosed(int owner_socket);
     void OnSocketClosed(int owner_socket);

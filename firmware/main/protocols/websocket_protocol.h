@@ -8,6 +8,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 
+#include <atomic>
+
 #define WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT (1 << 0)
 
 class WebsocketProtocol : public Protocol {
@@ -24,6 +26,7 @@ public:
 private:
     EventGroupHandle_t event_group_handle_;
     std::unique_ptr<WebSocket> websocket_;
+    std::atomic<uint32_t> connection_generation_{0};
     int version_ = 1;
 
     void ParseServerHello(const cJSON* root);

@@ -9,6 +9,12 @@
 #include <mutex>
 
 #include "motion_live_core.h"
+#include "motion_package_hardware_runner.h"
+#include "motion_package_manager.h"
+#include "motion_package_nvs_store.h"
+#include "motion_package_player.h"
+#include "motion_package_protocol.h"
+#include "motion_package_runner.h"
 
 namespace gosha::motion_live {
 
@@ -53,6 +59,12 @@ private:
                           const std::string& fallback_session_id) const;
 
     MotionLiveCore core_;
+    MotionPackageNvsStoreBackend package_store_backend_;
+    MotionPackageManager package_manager_;
+    MotionPackagePlayer package_player_;
+    MotionPackageRunner package_runner_;
+    MotionPackageHardwareRunner package_hardware_runner_;
+    MotionPackageProtocol package_protocol_;
     mutable std::mutex mutex_;
     esp_timer_handle_t watchdog_timer_ = nullptr;
 };

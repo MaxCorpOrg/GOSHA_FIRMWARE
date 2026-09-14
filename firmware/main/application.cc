@@ -11,13 +11,18 @@
 #include "settings.h"
 #include "runtime_event_reporter.h"
 #include "diagnostic_redaction.h"
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+#include "boards/gosha-v1/motion_live_adapter.h"
+#endif
 
 #include <cstring>
 #include <esp_log.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
+#include <esp_err.h>
 #include <font_awesome.h>
+#include <cstdint>
 
 #define TAG "Application"
 
@@ -27,6 +32,41 @@ namespace {
 constexpr bool kGoshaNoMotionSafeProfile = true;
 #else
 constexpr bool kGoshaNoMotionSafeProfile = false;
+#endif
+
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+constexpr int kGoshaVoiceMotionLiveOwnerFirst = -0x47564f49;
+
+bool IsAllowedVoiceMotionLiveOp(cJSON* payload) {
+    if (!cJSON_IsObject(payload)) {
+        return false;
+    }
+    auto protocol = cJSON_GetObjectItem(payload, "protocol");
+    auto op = cJSON_GetObjectItem(payload, "op");
+    if (!cJSON_IsString(protocol) || !cJSON_IsString(op) ||
+        strcmp(protocol->valuestring, gosha::motion_live::kProtocol) != 0) {
+        return false;
+    }
+    return strcmp(op->valuestring, "hello") == 0 ||
+           strcmp(op->valuestring, "initialize_right_arm") == 0 ||
+           strcmp(op->valuestring, "arm") == 0 ||
+           strcmp(op->valuestring, "pose") == 0 ||
+           strcmp(op->valuestring, "stop") == 0;
+}
+
+void CopyRequestFieldIfMissing(cJSON* reply, cJSON* request, const char* key) {
+    if (!cJSON_IsObject(reply) || !cJSON_IsObject(request) || cJSON_GetObjectItem(reply, key) != nullptr) {
+        return;
+    }
+    cJSON* value = cJSON_GetObjectItem(request, key);
+    if (value == nullptr) {
+        return;
+    }
+    cJSON* copy = cJSON_Duplicate(value, 1);
+    if (copy != nullptr) {
+        cJSON_AddItemToObject(reply, key, copy);
+    }
+}
 #endif
 
 }  // namespace
@@ -39,10 +79,13 @@ Application::Application() {
 #error "CONFIG_USE_DEVICE_AEC and CONFIG_USE_SERVER_AEC cannot be enabled at the same time"
 #elif CONFIG_USE_DEVICE_AEC
     aec_mode_ = kAecOnDeviceSide;
-#elif CONFIG_USE_SERVER_AEC
+#elif CONFIG_USE_SERVER_AEC && !defined(CONFIG_GOSHA_VOICE_SERVER_AEC_NEGOTIATION)
     aec_mode_ = kAecOnServerSide;
 #else
     aec_mode_ = kAecOff;
+#endif
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+    next_voice_motion_live_owner_id_ = kGoshaVoiceMotionLiveOwnerFirst;
 #endif
 
     esp_timer_create_args_t clock_timer_args = {
@@ -555,42 +598,74 @@ void Application::InitializeProtocol() {
         ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
         protocol_ = std::make_unique<MqttProtocol>();
     }
+    const uint32_t source_protocol_generation =
+        protocol_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    Protocol* source_protocol = protocol_.get();
 
-    protocol_->OnConnected([this]() {
+    protocol_->OnConnected([this, source_protocol_generation]() {
+        if (protocol_generation_.load(std::memory_order_acquire) != source_protocol_generation) {
+            return;
+        }
         DismissAlert();
     });
 
-    protocol_->OnNetworkError([this](const std::string& message) {
+    protocol_->OnNetworkError([this, source_protocol_generation](const std::string& message) {
+        if (protocol_generation_.load(std::memory_order_acquire) != source_protocol_generation) {
+            return;
+        }
         last_error_message_ = message;
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
     });
     
-    protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
+    protocol_->OnIncomingAudio([this, source_protocol_generation](std::unique_ptr<AudioStreamPacket> packet) {
+        if (protocol_generation_.load(std::memory_order_acquire) != source_protocol_generation) {
+            return;
+        }
         if (GetDeviceState() == kDeviceStateSpeaking) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
     });
     
-    protocol_->OnAudioChannelOpened([this, codec, &board]() {
-        board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
-        if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
-            ESP_LOGI(TAG, "Audio contract: uplink/input %d Hz, server downlink %d Hz, codec output %d Hz; output resampling enabled",
-                Protocol::kAudioUplinkSampleRate, protocol_->server_sample_rate(), codec->output_sample_rate());
+    protocol_->OnAudioChannelOpened([this, codec, &board, source_protocol, source_protocol_generation]() {
+        if (protocol_generation_.load(std::memory_order_acquire) != source_protocol_generation) {
+            return;
         }
+        board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+        BeginVoiceMotionLiveOwner();
+        if (source_protocol->server_sample_rate() != codec->output_sample_rate()) {
+            ESP_LOGI(TAG, "Audio contract: uplink/input %d Hz, server downlink %d Hz, codec output %d Hz; output resampling enabled",
+                Protocol::kAudioUplinkSampleRate, source_protocol->server_sample_rate(), codec->output_sample_rate());
+        }
+        ESP_LOGI(TAG, "Voice duplex mode: %s",
+                 source_protocol->server_aec_negotiated() ? "server_aec" : "half_duplex");
     });
     
-    protocol_->OnAudioChannelClosed([this, &board]() {
+    protocol_->OnAudioChannelClosed([this, &board, source_protocol_generation]() {
+        if (protocol_generation_.load(std::memory_order_acquire) != source_protocol_generation) {
+            return;
+        }
+        RetireVoiceMotionLiveOwner();
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
-        Schedule([this]() {
+        Schedule([this, source_protocol_generation]() {
+            if (protocol_generation_.load(std::memory_order_acquire) != source_protocol_generation) {
+                return;
+            }
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
         });
     });
     
-    protocol_->OnIncomingJson([this, display](const cJSON* root) {
+    protocol_->OnIncomingJson([this, display, source_protocol, source_protocol_generation](const cJSON* root) {
+        if (protocol_generation_.load(std::memory_order_acquire) != source_protocol_generation) {
+            return;
+        }
         // Parse JSON data
         auto type = cJSON_GetObjectItem(root, "type");
+        if (!cJSON_IsString(type)) {
+            ESP_LOGW(TAG, "Incoming JSON message without string type");
+            return;
+        }
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
@@ -637,6 +712,67 @@ void Application::InitializeProtocol() {
             if (cJSON_IsObject(payload)) {
                 McpServer::GetInstance().ParseMessage(payload);
             }
+        } else if (strcmp(type->valuestring, "motion_live") == 0) {
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+            auto payload = cJSON_GetObjectItem(root, "payload");
+            std::lock_guard<std::mutex> voice_lock(voice_motion_live_mutex_);
+            const int owner_id = voice_motion_live_owner_id_.load(std::memory_order_acquire);
+            const uint32_t voice_generation =
+                voice_motion_live_generation_.load(std::memory_order_acquire);
+            if (!cJSON_IsObject(payload)) {
+                SendMotionLiveErrorForOwner(
+                    "bad_json", "motion_live payload object is required",
+                    owner_id, voice_generation, source_protocol_generation,
+                    source_protocol);
+                return;
+            }
+            if (owner_id == 0) {
+                SendMotionLiveErrorForOwner(
+                    "voice_channel_closed", "Motion Live voice owner is not active",
+                    owner_id, voice_generation, source_protocol_generation,
+                    source_protocol, payload);
+                return;
+            }
+            if (!IsAllowedVoiceMotionLiveOp(payload)) {
+                SendMotionLiveErrorForOwner(
+                    "operation_unavailable", "Motion Live operation is not allowed over the voice channel",
+                    owner_id, voice_generation, source_protocol_generation,
+                    source_protocol, payload);
+                return;
+            }
+            cJSON* payload_copy = cJSON_Duplicate(payload, 1);
+            if (payload_copy == nullptr) {
+                SendMotionLiveErrorForOwner(
+                    "internal_error", "Motion Live request could not be copied",
+                    owner_id, voice_generation, source_protocol_generation,
+                    source_protocol, payload);
+                return;
+            }
+            auto sender = [this, payload_copy, owner_id, voice_generation,
+                           source_protocol_generation, source_protocol](cJSON* reply) -> esp_err_t {
+                CopyRequestFieldIfMissing(reply, payload_copy, "request_id");
+                char* text = cJSON_PrintUnformatted(reply);
+                if (text == nullptr) {
+                    return ESP_ERR_NO_MEM;
+                }
+                std::string payload_text(text);
+                cJSON_free(text);
+                SendMotionLiveMessageForOwner(
+                    std::move(payload_text), owner_id, voice_generation,
+                    source_protocol_generation, source_protocol);
+                return ESP_OK;
+            };
+            if (!gosha::motion_live::MotionLiveAdapter::GetInstance().HandleTransportMessage(
+                    owner_id, payload_copy, sender)) {
+                SendMotionLiveErrorForOwner(
+                    "bad_json", "Motion Live protocol payload is required",
+                    owner_id, voice_generation, source_protocol_generation,
+                    source_protocol, payload);
+            }
+            cJSON_Delete(payload_copy);
+#else
+            ESP_LOGW(TAG, "Motion Live voice bridge is not enabled in this build");
+#endif
         } else if (strcmp(type->valuestring, "system") == 0) {
             auto command = cJSON_GetObjectItem(root, "command");
             if (cJSON_IsString(command)) {
@@ -796,7 +932,11 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
         }
     }
 
-    SetListeningMode(mode);
+    ListeningMode effective_mode = mode;
+    if (protocol_->server_aec_negotiated()) {
+        effective_mode = kListeningModeRealtime;
+    }
+    SetListeningMode(effective_mode);
 }
 
 void Application::HandleStartListeningEvent() {
@@ -825,10 +965,12 @@ void Application::HandleStartListeningEvent() {
             });
             return;
         }
-        SetListeningMode(kListeningModeManualStop);
+        SetListeningMode(protocol_->server_aec_negotiated() ? kListeningModeRealtime
+                                                             : kListeningModeManualStop);
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
-        SetListeningMode(kListeningModeManualStop);
+        SetListeningMode(protocol_->server_aec_negotiated() ? kListeningModeRealtime
+                                                             : kListeningModeManualStop);
     }
 }
 
@@ -1022,15 +1164,20 @@ void Application::SetListeningMode(ListeningMode mode) {
 }
 
 ListeningMode Application::GetDefaultListeningMode() const {
+    if (protocol_ && protocol_->server_aec_negotiated()) {
+        return kListeningModeRealtime;
+    }
     return aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime;
 }
 
 void Application::Reboot() {
     ESP_LOGI(TAG, "Rebooting...");
+    protocol_generation_.fetch_add(1, std::memory_order_acq_rel);
     // Disconnect the audio channel
     if (protocol_ && protocol_->IsAudioChannelOpened()) {
         protocol_->CloseAudioChannel();
     }
+    RetireVoiceMotionLiveOwner();
     protocol_.reset();
     audio_service_.Stop();
 
@@ -1155,6 +1302,112 @@ void Application::SendMcpMessage(const std::string& payload) {
     });
 }
 
+void Application::BeginVoiceMotionLiveOwner() {
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+    std::lock_guard<std::mutex> lock(voice_motion_live_mutex_);
+    RetireVoiceMotionLiveOwnerLocked();
+    voice_motion_live_generation_.fetch_add(1, std::memory_order_acq_rel);
+    voice_motion_live_owner_id_.store(next_voice_motion_live_owner_id_, std::memory_order_release);
+    if (next_voice_motion_live_owner_id_ > INT32_MIN + 1) {
+        --next_voice_motion_live_owner_id_;
+    } else {
+        next_voice_motion_live_owner_id_ = kGoshaVoiceMotionLiveOwnerFirst;
+    }
+#endif
+}
+
+void Application::RetireVoiceMotionLiveOwner() {
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+    std::lock_guard<std::mutex> lock(voice_motion_live_mutex_);
+    RetireVoiceMotionLiveOwnerLocked();
+#endif
+}
+
+void Application::RetireVoiceMotionLiveOwnerLocked() {
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+    const int owner_id = voice_motion_live_owner_id_.exchange(0, std::memory_order_acq_rel);
+    voice_motion_live_generation_.fetch_add(1, std::memory_order_acq_rel);
+    if (owner_id != 0) {
+        gosha::motion_live::MotionLiveAdapter::GetInstance().OnTransportClosed(
+            owner_id);
+    }
+#endif
+}
+
+void Application::SendMotionLiveMessageForOwner(std::string payload,
+                                                int expected_owner_id,
+                                                uint32_t expected_voice_generation,
+                                                uint32_t expected_protocol_generation,
+                                                Protocol* expected_protocol,
+                                                bool require_active_owner) {
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+    Schedule([this, payload = std::move(payload), expected_owner_id,
+              expected_voice_generation, expected_protocol_generation,
+              expected_protocol, require_active_owner]() {
+        if (protocol_generation_.load(std::memory_order_acquire) != expected_protocol_generation ||
+            voice_motion_live_generation_.load(std::memory_order_acquire) != expected_voice_generation ||
+            protocol_.get() != expected_protocol || !protocol_ ||
+            !protocol_->IsAudioChannelOpened()) {
+            return;
+        }
+        if (require_active_owner &&
+            (expected_owner_id == 0 ||
+             voice_motion_live_owner_id_.load(std::memory_order_acquire) != expected_owner_id)) {
+            return;
+        }
+        if (!require_active_owner && expected_owner_id != 0 &&
+            voice_motion_live_owner_id_.load(std::memory_order_acquire) != expected_owner_id) {
+            return;
+        }
+        protocol_->SendMotionLiveMessage(payload);
+    });
+#else
+    (void)payload;
+    (void)expected_owner_id;
+    (void)expected_voice_generation;
+    (void)expected_protocol_generation;
+    (void)expected_protocol;
+    (void)require_active_owner;
+#endif
+}
+
+void Application::SendMotionLiveErrorForOwner(const char* code,
+                                              const char* message,
+                                              int expected_owner_id,
+                                              uint32_t expected_voice_generation,
+                                              uint32_t expected_protocol_generation,
+                                              Protocol* expected_protocol,
+                                              cJSON* request) {
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+    cJSON* reply = cJSON_CreateObject();
+    if (reply == nullptr) {
+        return;
+    }
+    cJSON_AddStringToObject(reply, "protocol", gosha::motion_live::kProtocol);
+    cJSON_AddStringToObject(reply, "op", "error");
+    cJSON_AddStringToObject(reply, "code", code);
+    cJSON_AddStringToObject(reply, "message", message);
+    CopyRequestFieldIfMissing(reply, request, "request_id");
+    CopyRequestFieldIfMissing(reply, request, "session_id");
+    char* text = cJSON_PrintUnformatted(reply);
+    if (text != nullptr) {
+        SendMotionLiveMessageForOwner(
+            std::string(text), expected_owner_id, expected_voice_generation,
+            expected_protocol_generation, expected_protocol, false);
+        cJSON_free(text);
+    }
+    cJSON_Delete(reply);
+#else
+    (void)code;
+    (void)message;
+    (void)expected_owner_id;
+    (void)expected_voice_generation;
+    (void)expected_protocol_generation;
+    (void)expected_protocol;
+    (void)request;
+#endif
+}
+
 void Application::SetAecMode(AecMode mode) {
     aec_mode_ = mode;
     Schedule([this]() {
@@ -1188,10 +1441,12 @@ void Application::PlaySound(const std::string_view& sound) {
 
 void Application::ResetProtocol() {
     Schedule([this]() {
+        protocol_generation_.fetch_add(1, std::memory_order_acq_rel);
         // Close audio channel if opened
         if (protocol_ && protocol_->IsAudioChannelOpened()) {
             protocol_->CloseAudioChannel();
         }
+        RetireVoiceMotionLiveOwner();
         // Reset protocol
         protocol_.reset();
     });

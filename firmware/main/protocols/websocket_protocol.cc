@@ -1,9 +1,11 @@
 #include "websocket_protocol.h"
+#include "binary_protocol_parser.h"
 #include "board.h"
 #include "system_info.h"
 #include "application.h"
 #include "settings.h"
 #include "diagnostic_redaction.h"
+#include "sdkconfig.h"
 
 #include <cstring>
 #include <cJSON.h>
@@ -64,7 +66,8 @@ bool WebsocketProtocol::SendText(const std::string& text) {
     }
 
     if (!websocket_->Send(text)) {
-        ESP_LOGE(TAG, "Failed to send text: %s", text.c_str());
+        ESP_LOGE(TAG, "Failed to send websocket text frame, bytes=%u",
+                 static_cast<unsigned>(text.size()));
         SetError(Lang::Strings::SERVER_ERROR);
         return false;
     }
@@ -78,19 +81,33 @@ bool WebsocketProtocol::IsAudioChannelOpened() const {
 
 void WebsocketProtocol::CloseAudioChannel(bool send_goodbye) {
     (void)send_goodbye;  // Websocket doesn't need to send goodbye message
+    const bool had_channel = websocket_ != nullptr;
+    if (had_channel) {
+        connection_generation_.fetch_add(1, std::memory_order_acq_rel);
+    }
     websocket_.reset();
+    server_aec_negotiated_.store(false, std::memory_order_release);
+    if (had_channel && on_audio_channel_closed_ != nullptr) {
+        on_audio_channel_closed_();
+    }
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
     Settings settings("websocket", false);
     std::string url = settings.GetString("url");
     std::string token = settings.GetString("token");
+#if defined(CONFIG_GOSHA_VOICE_SERVER_AEC_NEGOTIATION)
+    // Server-side echo cancellation for full duplex requires BinaryProtocol2 timestamps.
+    version_ = 2;
+#else
     int version = settings.GetInt("version");
     if (version != 0) {
         version_ = version;
     }
+#endif
 
     error_occurred_ = false;
+    server_aec_negotiated_.store(false, std::memory_order_release);
 
     auto network = Board::GetInstance().GetNetwork();
     websocket_ = network->CreateWebSocket(1);
@@ -98,6 +115,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
         ESP_LOGE(TAG, "Failed to create websocket");
         return false;
     }
+    const uint32_t connection_generation =
+        connection_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
 
     if (!token.empty()) {
         // If token not has a space, add "Bearer " prefix
@@ -110,45 +129,30 @@ bool WebsocketProtocol::OpenAudioChannel() {
     websocket_->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     websocket_->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
 
-    websocket_->OnData([this](const char* data, size_t len, bool binary) {
+    websocket_->OnData([this, connection_generation](const char* data, size_t len, bool binary) {
+        if (connection_generation_.load(std::memory_order_acquire) != connection_generation) {
+            return;
+        }
         if (binary) {
             if (on_incoming_audio_ != nullptr) {
-                if (version_ == 2) {
-                    BinaryProtocol2* bp2 = (BinaryProtocol2*)data;
-                    bp2->version = ntohs(bp2->version);
-                    bp2->type = ntohs(bp2->type);
-                    bp2->timestamp = ntohl(bp2->timestamp);
-                    bp2->payload_size = ntohl(bp2->payload_size);
-                    auto payload = (uint8_t*)bp2->payload;
-                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
-                        .sample_rate = server_sample_rate_,
-                        .frame_duration = server_frame_duration_,
-                        .timestamp = bp2->timestamp,
-                        .payload = std::vector<uint8_t>(payload, payload + bp2->payload_size)
-                    }));
-                } else if (version_ == 3) {
-                    BinaryProtocol3* bp3 = (BinaryProtocol3*)data;
-                    bp3->type = bp3->type;
-                    bp3->payload_size = ntohs(bp3->payload_size);
-                    auto payload = (uint8_t*)bp3->payload;
-                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
-                        .sample_rate = server_sample_rate_,
-                        .frame_duration = server_frame_duration_,
-                        .timestamp = 0,
-                        .payload = std::vector<uint8_t>(payload, payload + bp3->payload_size)
-                    }));
+                AudioStreamPacket packet;
+                const auto decode_result = protocol_binary::DecodeAudioPacket(
+                    version_, data, len, server_sample_rate_, server_frame_duration_, &packet);
+                if (decode_result == protocol_binary::DecodeAudioResult::kOk) {
+                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(std::move(packet)));
                 } else {
-                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
-                        .sample_rate = server_sample_rate_,
-                        .frame_duration = server_frame_duration_,
-                        .timestamp = 0,
-                        .payload = std::vector<uint8_t>((uint8_t*)data, (uint8_t*)data + len)
-                    }));
+                    ESP_LOGW(TAG, "Dropped invalid websocket binary audio frame, version=%d, reason=%d, bytes=%u",
+                             version_, static_cast<int>(decode_result), static_cast<unsigned>(len));
                 }
             }
         } else {
-            // Parse JSON data
-            auto root = cJSON_Parse(data);
+            // Parse JSON data. The WebSocket callback provides an explicit length,
+            // so do not assume NUL termination and do not echo payload text in logs.
+            auto root = cJSON_ParseWithLengthOpts(data, len, nullptr, false);
+            if (root == nullptr) {
+                ESP_LOGE(TAG, "Invalid websocket JSON frame, bytes=%u", static_cast<unsigned>(len));
+                return;
+            }
             auto type = cJSON_GetObjectItem(root, "type");
             if (cJSON_IsString(type)) {
                 if (strcmp(type->valuestring, "hello") == 0) {
@@ -159,15 +163,22 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     }
                 }
             } else {
-                ESP_LOGE(TAG, "Missing message type, data: %s", data);
+                ESP_LOGE(TAG, "Websocket JSON frame missing string type, bytes=%u",
+                         static_cast<unsigned>(len));
             }
             cJSON_Delete(root);
         }
         last_incoming_time_ = std::chrono::steady_clock::now();
     });
 
-    websocket_->OnDisconnected([this]() {
+    websocket_->OnDisconnected([this, connection_generation]() {
+        uint32_t expected = connection_generation;
+        if (!connection_generation_.compare_exchange_strong(
+                expected, connection_generation + 1, std::memory_order_acq_rel)) {
+            return;
+        }
         ESP_LOGI(TAG, "Websocket disconnected");
+        server_aec_negotiated_.store(false, std::memory_order_release);
         if (on_audio_channel_closed_ != nullptr) {
             on_audio_channel_closed_();
         }
@@ -208,10 +219,16 @@ std::string WebsocketProtocol::GetHelloMessage() {
     cJSON_AddStringToObject(root, "type", "hello");
     cJSON_AddNumberToObject(root, "version", version_);
     cJSON* features = cJSON_CreateObject();
-#if CONFIG_USE_SERVER_AEC
+#if defined(CONFIG_GOSHA_VOICE_SERVER_AEC_NEGOTIATION)
+    cJSON_AddBoolToObject(features, "live_duplex", true);
+    cJSON_AddStringToObject(features, "aec", "server");
+#elif CONFIG_USE_SERVER_AEC
     cJSON_AddBoolToObject(features, "aec", true);
 #endif
     cJSON_AddBoolToObject(features, "mcp", true);
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+    cJSON_AddBoolToObject(features, "motion_live", true);
+#endif
     cJSON_AddItemToObject(root, "features", features);
     cJSON_AddStringToObject(root, "transport", "websocket");
     AddAudioParams(root, OPUS_FRAME_DURATION_MS);
@@ -223,9 +240,10 @@ std::string WebsocketProtocol::GetHelloMessage() {
 }
 
 void WebsocketProtocol::ParseServerHello(const cJSON* root) {
+    server_aec_negotiated_.store(false, std::memory_order_release);
     auto transport = cJSON_GetObjectItem(root, "transport");
-    if (transport == nullptr || strcmp(transport->valuestring, "websocket") != 0) {
-        ESP_LOGE(TAG, "Unsupported transport: %s", transport->valuestring);
+    if (!cJSON_IsString(transport) || strcmp(transport->valuestring, "websocket") != 0) {
+        ESP_LOGE(TAG, "Unsupported websocket server hello transport");
         return;
     }
 
@@ -246,6 +264,18 @@ void WebsocketProtocol::ParseServerHello(const cJSON* root) {
             server_frame_duration_ = frame_duration->valueint;
         }
     }
+
+#if defined(CONFIG_GOSHA_VOICE_SERVER_AEC_NEGOTIATION)
+    auto features = cJSON_GetObjectItem(root, "features");
+    auto live_duplex = cJSON_IsObject(features) ? cJSON_GetObjectItem(features, "live_duplex") : nullptr;
+    auto aec = cJSON_IsObject(features) ? cJSON_GetObjectItem(features, "aec") : nullptr;
+    const bool server_aec_ack =
+        cJSON_IsTrue(live_duplex) && cJSON_IsString(aec) &&
+        strcmp(aec->valuestring, "server") == 0 && version_ == 2;
+    server_aec_negotiated_.store(server_aec_ack, std::memory_order_release);
+    ESP_LOGI(TAG, "Live duplex server AEC negotiation: %s",
+             server_aec_negotiated_.load(std::memory_order_acquire) ? "enabled" : "disabled");
+#endif
 
     xEventGroupSetBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT);
 }

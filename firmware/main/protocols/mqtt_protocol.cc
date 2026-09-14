@@ -301,7 +301,7 @@ std::string MqttProtocol::GetHelloMessage() {
     cJSON_AddNumberToObject(root, "version", 3);
     cJSON_AddStringToObject(root, "transport", "udp");
     cJSON* features = cJSON_CreateObject();
-#if CONFIG_USE_SERVER_AEC
+#if CONFIG_USE_SERVER_AEC && !defined(CONFIG_GOSHA_VOICE_SERVER_AEC_NEGOTIATION)
     cJSON_AddBoolToObject(features, "aec", true);
 #endif
     cJSON_AddBoolToObject(features, "mcp", true);

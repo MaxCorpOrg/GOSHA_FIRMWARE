@@ -2,8 +2,10 @@
 #define PROTOCOL_H
 
 #include <cJSON.h>
+#include <atomic>
 #include <string>
 #include <functional>
+#include <memory>
 #include <chrono>
 #include <vector>
 
@@ -58,6 +60,10 @@ public:
     inline const std::string& session_id() const {
         return session_id_;
     }
+    inline bool server_aec_negotiated() const {
+        return server_aec_negotiated_.load(std::memory_order_acquire);
+    }
+
 
     void OnIncomingAudio(std::function<void(std::unique_ptr<AudioStreamPacket> packet)> callback);
     void OnIncomingJson(std::function<void(const cJSON* root)> callback);
@@ -77,6 +83,7 @@ public:
     virtual void SendStopListening();
     virtual void SendAbortSpeaking(AbortReason reason);
     virtual void SendMcpMessage(const std::string& message);
+    virtual void SendMotionLiveMessage(const std::string& message);
 
 protected:
     std::function<void(const cJSON* root)> on_incoming_json_;
@@ -90,6 +97,7 @@ protected:
     int server_sample_rate_ = 24000;
     int server_frame_duration_ = 60;
     bool error_occurred_ = false;
+    std::atomic<bool> server_aec_negotiated_{false};
     std::string session_id_;
     std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_;
 

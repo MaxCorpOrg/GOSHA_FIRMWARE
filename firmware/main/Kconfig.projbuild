@@ -579,6 +579,32 @@ config GOSHA_MOTION_LIVE_USB_LOCAL_OPT_IN
         Home, trim, servo sequences, OTA, reboot and assets writes remain
         closed by the required no-motion/safe-neutral profiles.
 
+config GOSHA_VOICE_SERVER_AEC_NEGOTIATION
+    bool "GOSHA v1 negotiated server AEC for voice WebSocket"
+    depends on BOARD_TYPE_GOSHA_V1
+    depends on USE_AUDIO_PROCESSOR
+    select USE_SERVER_AEC
+    default n
+    help
+        Advertises live_duplex capability on the cloud voice WebSocket and
+        enables BinaryProtocol2 playback/uplink timestamps for server-side echo
+        cancellation. The device stays in the legacy half-duplex listening mode
+        unless the server hello confirms features.live_duplex=true and
+        features.aec="server". This option must not enable legacy MCP motion,
+        Home, trim, servo sequences, OTA, reboot or assets writes.
+
+config GOSHA_VOICE_MOTION_LIVE
+    bool "GOSHA v1 Motion Live bridge over authenticated voice WebSocket"
+    depends on BOARD_TYPE_GOSHA_V1
+    depends on GOSHA_MOTION_LIVE_LOCAL_OPT_IN
+    default n
+    help
+        Allows the authenticated cloud voice WebSocket to carry a bounded
+        type="motion_live" envelope into the existing gosha.motion.live.v1
+        adapter. Only hello, initialize_right_arm, arm, pose and stop are
+        intended for this path; package storage, upload/delete, trim, OTA,
+        reboot and legacy Otto motion remain closed.
+
 choice
     depends on BOARD_TYPE_LILYGO_T_DISPLAY_P4
     prompt "Select the screen type"

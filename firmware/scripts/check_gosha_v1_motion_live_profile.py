@@ -231,6 +231,8 @@ def validate_adapter(adapter: str, adapter_h: str) -> None:
     for token in (
         'cJSON_AddStringToObject(reply, "mode", caps.mode)',
         'cJSON_AddBoolToObject(reply, "commissioning", caps.commissioning)',
+        'cJSON_AddStringToObject(reply, "last_reset_reason"',
+        'cJSON_AddNumberToObject(reply, "last_reset_reason_code"',
         'cJSON_AddBoolToObject(reply, "initialization_required", caps.initialization_required)',
         'cJSON_AddBoolToObject(reply, "right_arm_available", caps.right_arm_available)',
         'cJSON_AddBoolToObject(reply, "right_arm_initialized", caps.right_arm_initialized)',
@@ -273,8 +275,11 @@ def validate_adapter(adapter: str, adapter_h: str) -> None:
             "watchdog must use a nonblocking periodic timer")
     watchdog_body = extract_body(adapter, r"void\s+MotionLiveAdapter::WatchdogTick\s*\(\s*\)",
                                  "MotionLiveAdapter::WatchdogTick")
-    require("MotionLiveTickResult result" in watchdog_body and "core_.Tick(NowMs())" in watchdog_body,
-            "periodic watchdog must use the lightweight core tick result")
+    require("MotionLiveTickResult result" in watchdog_body and
+            "const uint64_t now_ms = NowMs()" in watchdog_body and
+            "package_protocol_.TickHardwareRun(&core_, now_ms)" in watchdog_body and
+            "core_.Tick(now_ms)" in watchdog_body,
+            "periodic watchdog must use lightweight core/package tick results")
     require("MotionLiveResult" not in watchdog_body and "ReadPwmDiagnostics" not in watchdog_body and
             "pwm_diagnostics" not in watchdog_body,
             "periodic watchdog must not allocate response results or read PWM diagnostics")
