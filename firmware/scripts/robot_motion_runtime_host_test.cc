@@ -28,8 +28,112 @@ bool ReplyIs(cJSON* reply, const char* field, const char* expected) {
     cJSON_Delete(reply); return ok;
 }
 
+int TestLegacyCatalog() {
+    LegacyMotionPlan plan;
+    const LegacyMotionPlan::Pose neutral{90, 90, 90, 90, 90, 135};
+    LegacyMotionPlan::Pose target;
+    CHECK(LegacyMotionPlan::Catalog().size() == 27);
+    CHECK(plan.Build("builtin/walk_forward", neutral));
+    CHECK(plan.duration_ms() == 3050);  // 3 * 700 + 50 scheduling + Home 700 + 200.
+    CHECK(plan.Sample(175, &target));
+    CHECK(target[0] == 120 && target[1] == 120 && target[2] == 95 && target[3] == 85);
+    CHECK(plan.Sample(350, &target)); CHECK(target[2] == 125 && target[3] == 115);
+    CHECK(plan.Build("builtin/walk_backward", neutral));
+    CHECK(plan.Sample(0, &target)); CHECK(target[2] == 125 && target[3] == 115);
+    CHECK(plan.Build("builtin/jump", neutral));
+    CHECK(plan.Sample(700, &target)); CHECK(target[2] == 150 && target[3] == 30);
+    CHECK(plan.Build("builtin/hand_wave", neutral));
+    CHECK(plan.Sample(0, &target)); CHECK(target[5] == 40);
+    CHECK(plan.Sample(150, &target)); CHECK(target[5] == 0);
+    CHECK(plan.Sample(300, &target)); CHECK(target[5] == 40);
+    CHECK(plan.Build("builtin/sit", neutral));
+    CHECK(plan.Sample(600, &target)); CHECK(target[2] == 0 && target[3] == 180);
+    CHECK(!plan.Build("builtin/servo_sequence", neutral));
+
+    auto profile = MotionEditorProfile();
+    MemoryStore backend;
+    MotionPackageManager manager(&backend);
+    RobotMotionRuntime robot(&manager);
+    MotionLiveCore core;
+    core.SetLocalOptInEnabled(true); core.SetPreparedProfile(&profile); core.SetRuntimeConfig(RuntimeConfig());
+    int initialized = 0, applied = 0;
+    auto last = neutral;
+    core.SetRightArmInitializer([&](int value) { ++initialized; return value == 135; });
+    core.SetHardwareApplier([&](const auto& value) {
+        ++applied; last = value;
+        return value[4] == 90 && std::all_of(value.begin(), value.end(), [](int x) { return x >= 0 && x <= 180; });
+    });
+    uint64_t now = 1000;
+    int number = 0;
+    for (const auto& entry : LegacyMotionPlan::Catalog()) {
+        const auto id = std::string("catalog-request-") + std::to_string(++number);
+        CHECK(ReplyIs(robot.Play(&profile, &core, 7, entry.id, id, false, now), "status", "in_progress"));
+        CHECK(core.IsArmed());
+        CHECK(!core.Arm(7, kCalibration, true, "same-owner-editor1", now).ok);
+        MotionLiveTarget raw;
+        raw.present[1] = true; raw.relative_degrees[1] = 10;
+        CHECK(!core.Pose(7, "", 1, raw, 10, now).ok);
+        // Exercise the production 10 ms clock, with Studio's 50 ms clock alongside.
+        const auto limit = now + 121000;
+        while (robot.running() && now < limit) {
+            now += 10; robot.Tick(&core, now);
+            if (now % 50 == 0) core.Tick(now);
+        }
+        CHECK(ReplyIs(robot.Status(), "status", "finished"));
+        CHECK(!core.IsArmed() && last[4] == 90);
+        if (std::string(entry.id) == "builtin/sit") {
+            CHECK(last[0] == 120 && last[1] == 60 && last[2] == 0 && last[3] == 180);
+            CHECK(std::string(core.EvaluateSafety()) == "ordinary_pose_outside_editor");
+        } else if (std::string(entry.id) == "builtin/hands_up") {
+            CHECK(last[5] == 10);
+            CHECK(std::string(core.EvaluateSafety()) == "ordinary_pose_outside_editor");
+        } else {
+            CHECK(last == neutral);
+            CHECK(std::string(core.EvaluateSafety()) == "ok");
+        }
+        now += 100;
+    }
+    CHECK(initialized == 1 && applied > 1000 && backend.writes == 0);
+    // Stop preserves the actual commanded pose; a later Home restores Studio access.
+    CHECK(ReplyIs(robot.Play(&profile, &core, 7, "builtin/sit", "stop-sit-request01", false, now), "status", "in_progress"));
+    for (int i = 0; i < 50; ++i) { now += 10; robot.Tick(&core, now); }
+    const auto held = last; const auto before = applied;
+    CHECK(ReplyIs(robot.Stop(&core, 7), "status", "stopped"));
+    now += 1000; robot.Tick(&core, now); CHECK(last == held && applied == before);
+    CHECK(!core.Arm(8, kCalibration, true, "editor-after-sit01", now).ok);
+    // Valid stored payload prepares Home locally from a legacy pose before using
+    // the unchanged Studio validator/player. No store or active-pointer writes.
+    auto record = RecordFor(Payload());
+    MotionPackageStore store(&backend);
+    CHECK(store.Save({record.package_id.c_str(), record.profile_id.c_str(), record.calibration_id.c_str(),
+                     record.payload_crc32, record.payload.data(), record.payload.size()}).ok);
+    const auto saved = backend.values;
+    CHECK(ReplyIs(robot.Play(&profile, &core, 7, "stored/" + record.package_id, "stored-after-sit1", false, now), "status", "in_progress"));
+    const auto deadline = now + 20000;
+    while (robot.running() && now < deadline) { now += 10; robot.Tick(&core, now); if (now % 50 == 0) core.Tick(now); }
+    CHECK(ReplyIs(robot.Status(), "status", "finished"));
+    CHECK(backend.values == saved);
+    CHECK(ReplyIs(robot.Play(&profile, &core, 7, "builtin/hand_wave", "watchdog-request1", false, now), "status", "in_progress"));
+    const auto before_gap = applied;
+    now += 301; robot.Tick(&core, now);
+    CHECK(ReplyIs(robot.Status(), "reason", "watchdog_timeout"));
+    CHECK(!robot.running() && !core.IsArmed() && applied == before_gap);
+    // Partial PWM failure latches the fault; ordinary and editor commands cannot
+    // assume a known position after some channels may have accepted the write.
+    core.SetHardwareApplier([&](const auto&) { ++applied; return false; });
+    CHECK(ReplyIs(robot.Play(&profile, &core, 7, "builtin/jump", "failure-request01", false, now), "status", "in_progress"));
+    now += 50; robot.Tick(&core, now);
+    CHECK(ReplyIs(robot.Status(), "status", "failed"));
+    const auto failed_count = applied;
+    CHECK(ReplyIs(robot.Play(&profile, &core, 7, "builtin/home", "failure-request02", false, now), "status", "failed"));
+    CHECK(applied == failed_count && !core.IsArmed());
+    CHECK(!core.Arm(8, kCalibration, true, "editor-after-fail1", now).ok);
+    return 0;
+}
+
 int main() {
     CHECK(RunExistingRunnerTests() == 0);
+    CHECK(TestLegacyCatalog() == 0);
     auto profile = MotionEditorProfile();
     MemoryStore backend;
     MotionPackageStore store(&backend);
@@ -48,7 +152,7 @@ int main() {
         ++applied; min_right = std::min(min_right, degrees[5]); return true;
     });
     cJSON* listed = robot.List(&profile);
-    CHECK(cJSON_GetArraySize(cJSON_GetObjectItem(listed, "movements")) == 3);
+    CHECK(cJSON_GetArraySize(cJSON_GetObjectItem(listed, "movements")) == static_cast<int>(LegacyMotionPlan::Catalog().size() + 1));
     cJSON_Delete(listed);
     CHECK(initialized == 0 && applied == 0 && writes == backend.writes);
     CHECK(ReplyIs(robot.Play(&profile, &core, 7, "missing", "request-invalid0001", false, 0), "reason", "movement_unavailable"));
@@ -76,7 +180,7 @@ int main() {
     CHECK(ReplyIs(robot.Play(&profile, &core, 7, "builtin/greeting", "request-wave000002", false, 1000), "reason", "movement_busy"));
     for (uint64_t t = 1000; t <= 7100; t += 50) { robot.Tick(&core, t); core.Tick(t); }
     CHECK(ReplyIs(robot.Status(), "status", "finished"));
-    CHECK(!robot.running() && !core.IsArmed() && initialized == 1 && applied > 0 && min_right == 120);
+    CHECK(!robot.running() && !core.IsArmed() && initialized == 1 && applied > 0 && min_right == 0);
     for (const auto degrees : core.CommandedPose().relative_degrees) CHECK(degrees == 0);
     CHECK(ReplyIs(robot.Play(&profile, &core, 7, "builtin/hand_wave", "request-wave000001", false, 7200), "status", "finished"));
     CHECK(!robot.running());

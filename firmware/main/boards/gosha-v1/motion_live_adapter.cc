@@ -25,7 +25,7 @@ namespace gosha::motion_live {
 namespace {
 
 constexpr const char* TAG = "MotionLive";
-constexpr int64_t kWatchdogTickPeriodUs = 50 * 1000;
+constexpr int64_t kWatchdogTickPeriodUs = 10 * 1000;
 
 MotionLiveResult RuntimeBusyResult() {
     MotionLiveResult result;
@@ -374,6 +374,10 @@ void MotionLiveAdapter::WatchdogTick() {
         std::lock_guard<std::mutex> lock(mutex_);
         const uint64_t now_ms = NowMs();
         robot_motion_runtime_.Tick(&core_, now_ms);
+        // Keep the accepted Studio/package clock at 50 ms. Ordinary Otto
+        // choreography uses its original 10 ms movement interpolation clock.
+        if (now_ms >= last_editor_tick_ms_ && now_ms - last_editor_tick_ms_ < 50) return;
+        last_editor_tick_ms_ = now_ms;
         package_protocol_.TickHardwareRun(&core_, now_ms);
         result = core_.Tick(now_ms);
     }

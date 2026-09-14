@@ -23,6 +23,7 @@ BIN = BUILD_DIR / "robot_motion_runtime_host_test"
 
 
 def main() -> int:
+    subprocess.run(["python3", str(ROOT / "scripts/import_legacy_motion_routines.py"), "--check"], check=True)
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     compile_cmd = [
         "g++",
@@ -37,6 +38,7 @@ def main() -> int:
         "-I",
         str(IDF_JSON),
         str(ROOT / "main/boards/gosha-v1/robot_motion_runtime.cc"),
+        str(ROOT / "main/boards/gosha-v1/legacy_motion_plan.cc"),
         str(ROOT / "main/boards/gosha-v1/motion_package_manager.cc"),
         str(ROOT / "main/boards/gosha-v1/motion_package_store.cc"),
         str(HARDWARE_RUNNER_IMPL),

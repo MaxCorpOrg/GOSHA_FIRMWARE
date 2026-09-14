@@ -6,6 +6,7 @@
 #include <string>
 #include "motion_package_manager.h"
 #include "motion_package_hardware_runner.h"
+#include "legacy_motion_plan.h"
 
 namespace gosha::motion_live {
 
@@ -22,16 +23,22 @@ public:
     cJSON* Stop(MotionLiveCore* core, int owner);
     void Tick(MotionLiveCore* core, uint64_t now_ms);
     void OnTransportClosed(MotionLiveCore* core, int owner);
-    bool running() const { return runner_.running(); }
+    bool running() const { return legacy_running_ || runner_.running(); }
 
 private:
     struct Request { std::string id; std::string motion; };
-    bool LoadRecord(const MotionLivePreparedProfile& profile, const std::string& id,
+    bool LoadRecord(const std::string& id,
                     MotionPackageLoadedRecord* record);
     cJSON* Error(const char* reason) const;
     MotionPackageManager* manager_;
     MotionPackagePlayer player_;
     MotionPackageHardwareRunner runner_;
+    LegacyMotionPlan legacy_plan_;
+    bool legacy_running_ = false;
+    bool stored_after_home_ = false;
+    uint64_t legacy_start_ms_ = 0;
+    uint64_t last_tick_ms_ = 0;
+    const MotionLivePreparedProfile* profile_ = nullptr;
     std::deque<Request> requests_;
     std::string motion_id_;
     std::string request_id_;

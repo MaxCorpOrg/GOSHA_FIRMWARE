@@ -581,6 +581,10 @@ bool MotionLiveCore::ValidateRuntimeAgainstProfile(const char** reason) const {
 }
 
 bool MotionLiveCore::ValidateBaseSafety(const char** reason) const {
+    if (builtin_hardware_failed_) {
+        *reason = kHardwareApplyFailed;
+        return false;
+    }
     if (!ValidatePreparedProfile(reason)) {
         return false;
     }
@@ -603,7 +607,59 @@ const char* MotionLiveCore::EvaluateSafety() const {
             return kRightArmInitializationRequired;
         }
     }
+    if (builtin_movement_) return "robot_movement_active";
+    if (profile_) {
+        for (int i = 0; i < ProfileJointCount(); ++i) {
+            const auto& joint = profile_->joints[i];
+            const int index = FindJointIndexById(joint.id);
+            if (index < 0) return kProfileMismatch;
+            const double position = commanded_pose_.relative_degrees[index];
+            if (position < joint.min_relative_degrees || position > joint.max_relative_degrees)
+                return "ordinary_pose_outside_editor";
+        }
+    }
     return kOk;
+}
+
+const char* MotionLiveCore::BeginBuiltinMovement(int owner, uint64_t now_ms) {
+    if (armed_ || owner == 0) return kSessionBusy;
+    const char* reason = kOk;
+    if (!ValidateBaseSafety(&reason)) return reason;
+    if (!ProfileIsMotionEditor()) return kProfileMismatch;
+    if (!right_arm_initialized_) return kRightArmInitializationRequired;
+    // The existing verified GPIO/trim/neutral checks stay mandatory. Only the
+    // trusted choreography may use the former servo envelope (0..180 degrees).
+    armed_ = true; builtin_movement_ = true; owner_socket_ = owner;
+    last_command_ms_ = last_motion_step_ms_ = now_ms;
+    return kOk;
+}
+
+const char* MotionLiveCore::ApplyBuiltinMovement(
+    int owner, const std::array<int, kPoseJointCount>& target, uint64_t now_ms) {
+    if (!armed_ || !builtin_movement_ || owner_socket_ != owner) return "movement_not_owner";
+    if (now_ms < last_command_ms_ || now_ms - last_command_ms_ > kWatchdogMs)
+        return kWatchdogTimeout;
+    const char* reason = kOk;
+    if (!ValidateBaseSafety(&reason)) return reason;
+    // Never route to the disconnected left hand, even for two-arm choreography.
+    if (target[static_cast<int>(ServoSlot::kLeftHand)] !=
+        commanded_servo_degrees_[static_cast<int>(ServoSlot::kLeftHand)]) return kProfileMismatch;
+    for (const int degrees : target) if (degrees < 0 || degrees > 180) return kProfileMismatch;
+    if (target != commanded_servo_degrees_ && !ApplyHardware(target)) {
+        builtin_hardware_failed_ = true;
+        return kHardwareApplyFailed;
+    }
+    commanded_servo_degrees_ = target;
+    commanded_pose_ = PoseFromServoDegrees(target);
+    fractional_pose_ = target_pose_ = commanded_pose_;
+    last_command_ms_ = last_motion_step_ms_ = now_ms;
+    return kOk;
+}
+
+void MotionLiveCore::EndBuiltinMovement(int owner) {
+    if (!builtin_movement_ || owner_socket_ != owner) return;
+    builtin_movement_ = false;
+    ClearSession();
 }
 
 MotionLiveCapabilities MotionLiveCore::GetCapabilities() const {
@@ -688,6 +744,7 @@ MotionLiveResult MotionLiveCore::MakeAck(uint32_t seq, bool should_apply) const 
 
 void MotionLiveCore::ClearSession() {
     armed_ = false;
+    builtin_movement_ = false;
     owner_socket_ = -1;
     session_id_.clear();
     last_seq_ = 0;
@@ -713,6 +770,7 @@ MotionLiveTickResult MotionLiveCore::DisarmForTick(const char* code) {
 
 bool MotionLiveCore::ValidateOwnerSession(int owner_socket, const std::string& session_id,
                                           const char** reason) const {
+    if (builtin_movement_) { *reason = "robot_movement_active"; return false; }
     if (!armed_ || owner_socket != owner_socket_ || session_id.empty() ||
         session_id != session_id_) {
         *reason = kSessionNotOwner;
@@ -1297,6 +1355,7 @@ MotionLiveTickResult MotionLiveCore::Tick(uint64_t now_ms) {
     if (now_ms <= last_command_ms_ ||
         now_ms - last_command_ms_ <= static_cast<uint64_t>(kWatchdogMs)) {
         const char* reason = nullptr;
+        if (builtin_movement_) return result;
         if (ProfileStepsOnPassiveClock()) {
             if (!StepTowardTarget(now_ms, &reason, &result.hardware_changed)) {
                 return DisarmForTick(reason);
@@ -1312,6 +1371,7 @@ MotionLiveTickResult MotionLiveCore::Tick(uint64_t now_ms) {
 void MotionLiveCore::OnTransportClosed(int owner_socket) {
     if (armed_ && owner_socket == owner_socket_) {
         armed_ = false;
+        builtin_movement_ = false;
         owner_socket_ = -1;
         session_id_.clear();
         last_seq_ = 0;

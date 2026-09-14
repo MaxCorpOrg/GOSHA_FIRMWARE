@@ -237,6 +237,14 @@ public:
     const MotionLivePose& CommandedPose() const { return commanded_pose_; }
 
 private:
+    friend class RobotMotionRuntime;
+    // Only the local, named firmware catalog can enter the legacy envelope.
+    // These operations are intentionally absent from the Live wire protocol.
+    const char* BeginBuiltinMovement(int owner, uint64_t now_ms);
+    const char* ApplyBuiltinMovement(int owner, const std::array<int, kPoseJointCount>& target,
+                                    uint64_t now_ms);
+    void EndBuiltinMovement(int owner);
+    const std::array<int, kPoseJointCount>& BuiltinStartPose() const { return commanded_servo_degrees_; }
     bool ValidatePreparedProfile(const char** reason) const;
     bool ValidateRuntimeAgainstProfile(const char** reason) const;
     bool ValidateBaseSafety(const char** reason) const;
@@ -284,6 +292,8 @@ private:
     MotionLivePwmDiagnosticsProvider pwm_diagnostics_provider_;
 
     bool armed_ = false;
+    bool builtin_movement_ = false;
+    bool builtin_hardware_failed_ = false;
     bool right_arm_initialized_ = false;
     bool right_arm_initialization_failed_ = false;
     int owner_socket_ = -1;

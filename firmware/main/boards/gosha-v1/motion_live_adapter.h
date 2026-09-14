@@ -71,6 +71,7 @@ private:
     MotionPackageHardwareRunner package_hardware_runner_;
     MotionPackageProtocol package_protocol_;
     RobotMotionRuntime robot_motion_runtime_;
+    uint64_t last_editor_tick_ms_ = 0;
     mutable std::mutex mutex_;
     esp_timer_handle_t watchdog_timer_ = nullptr;
 };
