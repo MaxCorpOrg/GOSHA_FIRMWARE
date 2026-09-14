@@ -129,7 +129,8 @@ const MotionPackageHardwareRunnerResult& MotionPackageHardwareRunner::Start(
     const std::string& calibration_id,
     bool access_key_valid,
     double speed_dps,
-    uint64_t now_ms) {
+    uint64_t now_ms,
+    bool prepare_start) {
     if (active_ && !finished_) {
         return MakeError("package_hardware_run_busy");
     }
@@ -158,18 +159,19 @@ const MotionPackageHardwareRunnerResult& MotionPackageHardwareRunner::Start(
         result.code = sample_result.code;
         return result;
     }
-    if (!SafeStartSample(result.sample)) {
+    if (!prepare_start && !SafeStartSample(result.sample)) {
         result.ok = false;
         result.code = "package_hardware_start_pose";
         return result;
     }
-    if (!StartPoseMatches(core->CommandedPose(), result.sample)) {
+    if (!prepare_start && !StartPoseMatches(core->CommandedPose(), result.sample)) {
         result.ok = false;
         result.code = "package_hardware_start_pose";
         return result;
     }
 
     active_ = true;
+    preparing_ = prepare_start && !StartPoseMatches(core->CommandedPose(), result.sample);
     package_id_ = player.package_id();
     owner_id_ = owner_id;
     run_session_id_ = run_session_id;
@@ -236,7 +238,7 @@ const MotionPackageHardwareRunnerResult& MotionPackageHardwareRunner::TickActive
 
     MotionPackageHardwareRunnerResult& result = ResetResult();
     const MotionPackagePlayerResult sample_result =
-        player.Sample(ElapsedMs(start_ms_, now_ms), &result.sample);
+        player.Sample(preparing_ ? 0 : ElapsedMs(start_ms_, now_ms), &result.sample);
     if (!sample_result.ok) {
         const MotionPackageHardwareRunnerResult& stop_result =
             StopLiveSession(core, true);
@@ -279,13 +281,25 @@ const MotionPackageHardwareRunnerResult& MotionPackageHardwareRunner::TickActive
     result.hardware_apply = true;
     result.live_result = core->Pose(owner_id_, live_session_id_, ++live_seq_,
                                     result.sample.target,
-                                    speed_dps_, now_ms);
+                                    preparing_ ? std::min(speed_dps_, 5.0) : speed_dps_, now_ms);
     if (!result.live_result.ok) {
         result.ok = false;
         result.code = result.live_result.code;
         result.stopped = result.live_result.stopped;
         ClearState();
         return result;
+    }
+
+    if (preparing_) {
+        if (StartPoseMatches(core->CommandedPose(), result.sample)) {
+            preparing_ = false;
+            start_ms_ = now_ms;
+        } else if (ElapsedMs(start_ms_, now_ms) > 30000) {
+            StopLiveSession(core, true);
+            result_.ok = false;
+            result_.code = "movement_preparation_timeout";
+            return result_;
+        }
     }
 
     if (result.sample.finished) {
@@ -349,6 +363,7 @@ void MotionPackageHardwareRunner::ClearState() {
     live_started_ = false;
     finished_ = false;
     active_ = false;
+    preparing_ = false;
 }
 
 void MotionPackageHardwareRunner::Clear() {

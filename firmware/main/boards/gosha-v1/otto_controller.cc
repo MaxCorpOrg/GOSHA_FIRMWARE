@@ -725,6 +725,29 @@ public:
 
         ESP_LOGI(TAG, "Начинаю регистрацию инструментов MCP...");
 
+#if defined(CONFIG_GOSHA_RUNTIME_MOTIONS)
+        mcp_server.AddTool("self.motion.list", "Список готовых движений, встроенных в робота и сохранённых в его библиотеке.", PropertyList(),
+            [] (const PropertyList&) -> ReturnValue {
+                return gosha::motion_live::MotionLiveAdapter::GetInstance().ListRobotMovements();
+            });
+        mcp_server.AddTool("self.motion.play", "Выполнить готовое движение из списка. Робот сам готовит приводы и исполняет движение локально. Настройка движений не требуется.",
+            PropertyList({Property("motion_id", kPropertyTypeString), Property("request_id", kPropertyTypeString)}),
+            [] (const PropertyList& properties) -> ReturnValue {
+                return gosha::motion_live::MotionLiveAdapter::GetInstance().PlayRobotMovement(
+                    Application::GetInstance().RobotMovementOwner(), properties["motion_id"].value<std::string>(),
+                    properties["request_id"].value<std::string>());
+            });
+        mcp_server.AddTool("self.motion.status", "Прочитать состояние последнего готового движения: выполнение, завершение, остановка или ошибка.", PropertyList(),
+            [] (const PropertyList&) -> ReturnValue {
+                return gosha::motion_live::MotionLiveAdapter::GetInstance().RobotMovementStatus();
+            });
+        mcp_server.AddTool("self.motion.stop", "Остановить выполняемое движение и удерживать текущую позу.", PropertyList(),
+            [] (const PropertyList&) -> ReturnValue {
+                return gosha::motion_live::MotionLiveAdapter::GetInstance().StopRobotMovement(
+                    Application::GetInstance().RobotMovementOwner());
+            });
+#endif
+
         if (!kNoMotionSafeProfile) {
         // 统一动作工具（除了舵机序列外的所有动作）
         mcp_server.AddTool("self.otto.action",

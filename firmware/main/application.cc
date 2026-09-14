@@ -11,7 +11,7 @@
 #include "settings.h"
 #include "runtime_event_reporter.h"
 #include "diagnostic_redaction.h"
-#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE) || defined(CONFIG_GOSHA_RUNTIME_MOTIONS)
 #include "boards/gosha-v1/motion_live_adapter.h"
 #endif
 
@@ -34,9 +34,11 @@ constexpr bool kGoshaNoMotionSafeProfile = true;
 constexpr bool kGoshaNoMotionSafeProfile = false;
 #endif
 
-#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE) || defined(CONFIG_GOSHA_RUNTIME_MOTIONS)
 constexpr int kGoshaVoiceMotionLiveOwnerFirst = -0x47564f49;
+#endif
 
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
 bool IsAllowedVoiceMotionLiveOp(cJSON* payload) {
     if (!cJSON_IsObject(payload)) {
         return false;
@@ -84,7 +86,7 @@ Application::Application() {
 #else
     aec_mode_ = kAecOff;
 #endif
-#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE) || defined(CONFIG_GOSHA_RUNTIME_MOTIONS)
     next_voice_motion_live_owner_id_ = kGoshaVoiceMotionLiveOwnerFirst;
 #endif
 
@@ -1294,16 +1296,32 @@ bool Application::CanEnterSleepMode() {
 }
 
 void Application::SendMcpMessage(const std::string& payload) {
-    // Always schedule to run in main task for thread safety
-    Schedule([this, payload = std::move(payload)]() {
-        if (protocol_) {
+    const auto generation = voice_motion_live_generation_.load(std::memory_order_acquire);
+    const auto protocol_generation = protocol_generation_.load(std::memory_order_acquire);
+    Schedule([this, payload, generation, protocol_generation]() {
+        if (protocol_ && protocol_generation_.load(std::memory_order_acquire) == protocol_generation &&
+            voice_motion_live_generation_.load(std::memory_order_acquire) == generation) {
             protocol_->SendMcpMessage(payload);
         }
     });
 }
 
+void Application::ScheduleRobotMovement(std::function<void()>&& callback) {
+    const auto generation = voice_motion_live_generation_.load(std::memory_order_acquire);
+    const auto protocol_generation = protocol_generation_.load(std::memory_order_acquire);
+    const auto owner = voice_motion_live_owner_id_.load(std::memory_order_acquire);
+    Schedule([this, callback = std::move(callback), generation, protocol_generation, owner]() {
+        std::lock_guard<std::mutex> lock(voice_motion_live_mutex_);
+        if (owner == 0 || voice_motion_live_owner_id_.load(std::memory_order_acquire) != owner ||
+            voice_motion_live_generation_.load(std::memory_order_acquire) != generation ||
+            protocol_generation_.load(std::memory_order_acquire) != protocol_generation ||
+            !protocol_ || !protocol_->IsAudioChannelOpened()) return;
+        callback();
+    });
+}
+
 void Application::BeginVoiceMotionLiveOwner() {
-#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE) || defined(CONFIG_GOSHA_RUNTIME_MOTIONS)
     std::lock_guard<std::mutex> lock(voice_motion_live_mutex_);
     RetireVoiceMotionLiveOwnerLocked();
     voice_motion_live_generation_.fetch_add(1, std::memory_order_acq_rel);
@@ -1317,14 +1335,14 @@ void Application::BeginVoiceMotionLiveOwner() {
 }
 
 void Application::RetireVoiceMotionLiveOwner() {
-#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE) || defined(CONFIG_GOSHA_RUNTIME_MOTIONS)
     std::lock_guard<std::mutex> lock(voice_motion_live_mutex_);
     RetireVoiceMotionLiveOwnerLocked();
 #endif
 }
 
 void Application::RetireVoiceMotionLiveOwnerLocked() {
-#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE)
+#if defined(CONFIG_GOSHA_VOICE_MOTION_LIVE) || defined(CONFIG_GOSHA_RUNTIME_MOTIONS)
     const int owner_id = voice_motion_live_owner_id_.exchange(0, std::memory_order_acq_rel);
     voice_motion_live_generation_.fetch_add(1, std::memory_order_acq_rel);
     if (owner_id != 0) {

@@ -32,7 +32,8 @@ public:
         const std::string& calibration_id,
         bool access_key_valid,
         double speed_dps,
-        uint64_t now_ms);
+        uint64_t now_ms,
+        bool prepare_start = false);
     const MotionPackageHardwareRunnerResult& Tick(
         const MotionPackagePlayer& player,
         MotionLiveCore* core,
@@ -77,6 +78,7 @@ private:
     bool live_started_ = false;
     bool finished_ = false;
     bool active_ = false;
+    bool preparing_ = false;
 };
 
 }  // namespace gosha::motion_live

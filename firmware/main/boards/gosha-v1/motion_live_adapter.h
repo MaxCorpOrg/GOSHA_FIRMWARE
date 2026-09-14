@@ -15,6 +15,7 @@
 #include "motion_package_player.h"
 #include "motion_package_protocol.h"
 #include "motion_package_runner.h"
+#include "robot_motion_runtime.h"
 
 namespace gosha::motion_live {
 
@@ -33,6 +34,10 @@ public:
                                 const MotionLiveJsonSender& sender);
     void OnTransportClosed(int owner_id);
     void OnSocketClosed(int socket_fd);
+    cJSON* ListRobotMovements();
+    cJSON* PlayRobotMovement(int owner, const std::string& id, const std::string& request);
+    cJSON* RobotMovementStatus();
+    cJSON* StopRobotMovement(int owner);
 
 private:
     MotionLiveAdapter();
@@ -65,6 +70,7 @@ private:
     MotionPackageRunner package_runner_;
     MotionPackageHardwareRunner package_hardware_runner_;
     MotionPackageProtocol package_protocol_;
+    RobotMotionRuntime robot_motion_runtime_;
     mutable std::mutex mutex_;
     esp_timer_handle_t watchdog_timer_ = nullptr;
 };

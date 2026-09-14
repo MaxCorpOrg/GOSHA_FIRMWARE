@@ -27,6 +27,14 @@ namespace {
 constexpr const char* TAG = "MotionLive";
 constexpr int64_t kWatchdogTickPeriodUs = 50 * 1000;
 
+MotionLiveResult RuntimeBusyResult() {
+    MotionLiveResult result;
+    result.ok = false;
+    result.code = "robot_movement_active";
+    result.message = "A local robot movement owns the drives";
+    return result;
+}
+
 const char* ResetReasonName(esp_reset_reason_t reason) {
     switch (reason) {
         case ESP_RST_POWERON:
@@ -308,7 +316,8 @@ MotionLiveAdapter::MotionLiveAdapter()
       package_protocol_(&package_manager_, &package_player_, &package_runner_,
                         &package_hardware_runner_,
                         [this]() { return GenerateSessionId(); },
-                        [this]() { return NowMs(); }) {
+                        [this]() { return NowMs(); }),
+      robot_motion_runtime_(&package_manager_) {
     core_.SetLocalOptInEnabled(LocalOptInEnabled());
     core_.SetPreparedProfile(PreparedProfileOrNull());
 }
@@ -364,6 +373,7 @@ void MotionLiveAdapter::WatchdogTick() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         const uint64_t now_ms = NowMs();
+        robot_motion_runtime_.Tick(&core_, now_ms);
         package_protocol_.TickHardwareRun(&core_, now_ms);
         result = core_.Tick(now_ms);
     }
@@ -639,7 +649,8 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
         bool package_blocked_while_armed = false;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (core_.IsArmed() && !IsPackageHardwareRunFollowupOp(op)) {
+            if (robot_motion_runtime_.running() ||
+                (core_.IsArmed() && !IsPackageHardwareRunFollowupOp(op))) {
                 package_blocked_while_armed = true;
             } else {
                 package_protocol_.HandleMessage(
@@ -701,7 +712,7 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
         MotionLiveCapabilities caps;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = core_.InitializeRightArm(owner_id, calibration_id, init_access_ok);
+            result = robot_motion_runtime_.running() ? RuntimeBusyResult() : core_.InitializeRightArm(owner_id, calibration_id, init_access_ok);
             if (result.ok) {
                 caps = core_.GetCapabilities();
             }
@@ -723,7 +734,7 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
         MotionLiveResult result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = core_.Arm(owner_id, calibration_id, access_ok,
+            result = robot_motion_runtime_.running() ? RuntimeBusyResult() : core_.Arm(owner_id, calibration_id, access_ok,
                                GenerateSessionId(), NowMs());
         }
         if (result.ok) {
@@ -748,7 +759,7 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
         MotionLiveResult result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = core_.Pose(owner_id, session_id, seq, target, speed_dps, NowMs());
+            result = robot_motion_runtime_.running() ? RuntimeBusyResult() : core_.Pose(owner_id, session_id, seq, target, speed_dps, NowMs());
         }
         if (result.ok) {
             SendAck(sender, result);
@@ -768,7 +779,7 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
         MotionLiveResult result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = core_.Keepalive(owner_id, session_id, seq, NowMs());
+            result = robot_motion_runtime_.running() ? RuntimeBusyResult() : core_.Keepalive(owner_id, session_id, seq, NowMs());
         }
         if (result.ok) {
             SendAck(sender, result);
@@ -788,7 +799,7 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
         MotionLiveResult result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = core_.Stop(owner_id, session_id, seq);
+            result = robot_motion_runtime_.running() ? RuntimeBusyResult() : core_.Stop(owner_id, session_id, seq);
         }
         if (result.stopped) {
             SendStopped(sender, result, session_id);
@@ -804,12 +815,35 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
 
 void MotionLiveAdapter::OnTransportClosed(int owner_id) {
     std::lock_guard<std::mutex> lock(mutex_);
+    robot_motion_runtime_.OnTransportClosed(&core_, owner_id);
     core_.OnTransportClosed(owner_id);
     package_protocol_.OnTransportClosed(owner_id);
 }
 
 void MotionLiveAdapter::OnSocketClosed(int socket_fd) {
     OnTransportClosed(socket_fd);
+}
+
+cJSON* MotionLiveAdapter::ListRobotMovements() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return robot_motion_runtime_.List(PreparedProfileOrNull());
+}
+
+cJSON* MotionLiveAdapter::PlayRobotMovement(int owner, const std::string& id,
+                                           const std::string& request) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return robot_motion_runtime_.Play(PreparedProfileOrNull(), &core_, owner, id, request,
+                                      package_protocol_.run_active(), NowMs());
+}
+
+cJSON* MotionLiveAdapter::RobotMovementStatus() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return robot_motion_runtime_.Status();
+}
+
+cJSON* MotionLiveAdapter::StopRobotMovement(int owner) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return robot_motion_runtime_.Stop(&core_, owner);
 }
 
 }  // namespace gosha::motion_live

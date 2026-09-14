@@ -593,12 +593,25 @@ config GOSHA_VOICE_SERVER_AEC_NEGOTIATION
         features.aec="server". This option must not enable legacy MCP motion,
         Home, trim, servo sequences, OTA, reboot or assets writes.
 
-config GOSHA_VOICE_MOTION_LIVE
-    bool "GOSHA v1 Motion Live bridge over authenticated voice WebSocket"
+config GOSHA_RUNTIME_MOTIONS
+    bool "GOSHA named robot movements over MCP"
     depends on BOARD_TYPE_GOSHA_V1
     depends on GOSHA_MOTION_LIVE_LOCAL_OPT_IN
     default n
     help
+        Exposes a catalog and local playback of built-in and stored movements.
+        Drive preparation is internal to an explicit play request. Editing,
+        uploads, calibration and raw servo positions are not voice tools.
+        Does not attach the right arm or execute a movement at boot.
+
+config GOSHA_VOICE_MOTION_LIVE
+    bool "GOSHA v1 Motion Live bridge over authenticated voice WebSocket"
+    depends on BOARD_TYPE_GOSHA_V1
+    depends on GOSHA_MOTION_LIVE_LOCAL_OPT_IN
+    depends on !GOSHA_RUNTIME_MOTIONS
+    default n
+    help
+        Legacy diagnostic bridge. Normal voice uses GOSHA_RUNTIME_MOTIONS.
         Allows the authenticated cloud voice WebSocket to carry a bounded
         type="motion_live" envelope into the existing gosha.motion.live.v1
         adapter. Only hello, initialize_right_arm, arm, pose and stop are

@@ -596,12 +596,17 @@ void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* to
 
     // Use main thread to call the tool
     auto& app = Application::GetInstance();
-    app.Schedule([this, id, tool_iter, arguments = std::move(arguments)]() {
+    auto callback = [this, id, tool_iter, arguments = std::move(arguments)]() {
         try {
             ReplyResult(id, (*tool_iter)->Call(arguments));
         } catch (const std::exception& e) {
             ESP_LOGE(TAG, "tools/call: %s", e.what());
             ReplyError(id, e.what());
         }
-    });
+    };
+    if (tool_name.rfind("self.motion.", 0) == 0) {
+        app.ScheduleRobotMovement(std::move(callback));
+    } else {
+        app.Schedule(std::move(callback));
+    }
 }

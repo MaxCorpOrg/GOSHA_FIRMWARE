@@ -226,4 +226,30 @@ require("std::lock_guard<std::mutex> lock(voice_motion_live_mutex_)" in retire_o
         "OnTransportClosed" in retire_owner_locked,
         "voice Motion Live owner retire must serialize with admission and close adapter state")
 
+runtime = read("main/boards/gosha-v1/robot_motion_runtime.cc")
+controller = read("main/boards/gosha-v1/otto_controller.cc")
+mcp_server = read("main/mcp_server.cc")
+require("config GOSHA_RUNTIME_MOTIONS" in kconfig,
+        "named robot movements must be an explicit build option")
+runtime_tools = span_between(controller, "#if defined(CONFIG_GOSHA_RUNTIME_MOTIONS)", "#endif")
+for name in ("list", "play", "status", "stop"):
+    require(f'"self.motion.{name}"' in runtime_tools,
+            f"missing native movement operation {name}")
+require('tool_name.rfind("self.motion.", 0) == 0' in mcp_server and
+        "app.ScheduleRobotMovement(std::move(callback))" in mcp_server,
+        "native movement calls must use the connection-fenced dispatcher")
+dispatch = block_after(application, "void Application::ScheduleRobotMovement")
+for guard in ("std::lock_guard<std::mutex>", "owner == 0", "!= owner",
+              "!= generation", "!= protocol_generation", "!protocol_->IsAudioChannelOpened()"):
+    require(guard in dispatch, f"movement dispatch missing stale-session guard {guard}")
+require(dispatch.find("callback();") > dispatch.find("!protocol_->IsAudioChannelOpened()"),
+        "movement callbacks must execute only after connection checks")
+for op in ("InitializeRightArm", "Arm", "Pose", "Keepalive", "Stop"):
+    require(f"robot_motion_runtime_.running() ? RuntimeBusyResult() : core_.{op}(" in motion_adapter,
+            f"editor {op} must reject while ordinary movement owns drives")
+require("robot_motion_runtime_.Tick(&core_, now_ms)" in motion_adapter and
+        "robot_motion_runtime_.OnTransportClosed(&core_, owner_id)" in motion_adapter,
+        "movement playback and disconnect cleanup must run inside device ownership")
+require("LoadById" in runtime and "manager_->Select" not in runtime,
+        "ordinary playback must not change the editor's active package")
 print("check_gosha_voice_duplex_motion_contract: PASS")

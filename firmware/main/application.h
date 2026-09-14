@@ -109,6 +109,8 @@ public:
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
+    void ScheduleRobotMovement(std::function<void()>&& callback);
+    int RobotMovementOwner() const { return voice_motion_live_owner_id_.load(std::memory_order_acquire); }
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
