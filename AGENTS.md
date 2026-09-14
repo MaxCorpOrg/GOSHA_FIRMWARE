@@ -1,3 +1,12 @@
+## Текущий app — 14 сентября 2026
+
+Установлен `a63ac87`, SHA-256 `9ba5e327eb360c12ebf437a679dfe525b3c8064b77cd51dd99a7cd5cc5bfdfb4`,
+3 717 888 байт. App-only backup/write/verify/restart и read-only PASS.
+Обычные 27 команд возвращают прежние амплитуды/периоды отдельно от Studio.
+Левый канал отключён, нейтраль правого 135°, NVS и пакеты сохранены.
+Физический голосовой тест ходьбы ещё ожидается; root движения не запускал.
+`8df041e3…cdf55d` — rollback. См. docs/LEGACY_MOVEMENTS_RESTORE_RU.md.
+
 # AGENTS.md
 
 Это главный входной файл проекта `GOSHA_FIRMWARE`.
