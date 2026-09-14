@@ -710,8 +710,8 @@ MotionLiveCapabilities MotionLiveCore::GetCapabilities() const {
         return caps;
     }
 
-    caps.motion_allowed = true;
-    caps.reason = kOk;
+    caps.reason = EvaluateSafety();
+    caps.motion_allowed = Streq(caps.reason, kOk);
     return caps;
 }
 

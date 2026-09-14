@@ -69,6 +69,8 @@ int TestLegacyCatalog() {
         const auto id = std::string("catalog-request-") + std::to_string(++number);
         CHECK(ReplyIs(robot.Play(&profile, &core, 7, entry.id, id, false, now), "status", "in_progress"));
         CHECK(core.IsArmed());
+        CHECK(!core.GetCapabilities().motion_allowed);
+        CHECK(std::string(core.GetCapabilities().reason) == "robot_movement_active");
         CHECK(!core.Arm(7, kCalibration, true, "same-owner-editor1", now).ok);
         MotionLiveTarget raw;
         raw.present[1] = true; raw.relative_degrees[1] = 10;
@@ -84,9 +86,13 @@ int TestLegacyCatalog() {
         if (std::string(entry.id) == "builtin/sit") {
             CHECK(last[0] == 120 && last[1] == 60 && last[2] == 0 && last[3] == 180);
             CHECK(std::string(core.EvaluateSafety()) == "ordinary_pose_outside_editor");
+            CHECK(!core.GetCapabilities().motion_allowed);
+            CHECK(std::string(core.GetCapabilities().reason) == "ordinary_pose_outside_editor");
+            CHECK(core.GetCapabilities().servo_degrees[2] == 0);
         } else if (std::string(entry.id) == "builtin/hands_up") {
             CHECK(last[5] == 10);
             CHECK(std::string(core.EvaluateSafety()) == "ordinary_pose_outside_editor");
+            CHECK(!core.GetCapabilities().motion_allowed && core.GetCapabilities().servo_degrees[5] == 10);
         } else {
             CHECK(last == neutral);
             CHECK(std::string(core.EvaluateSafety()) == "ok");
