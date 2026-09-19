@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -15,7 +16,12 @@ JSON_IMPL = ROOT / "main/boards/gosha-v1/motion_package_json.cc"
 PACKAGE_IMPL = ROOT / "main/boards/gosha-v1/motion_package.cc"
 UPLOAD_IMPL = ROOT / "main/boards/gosha-v1/motion_package_upload.cc"
 CORE_IMPL = ROOT / "main/boards/gosha-v1/motion_live_core.cc"
-IDF_JSON = Path("/home/max/esp/esp-idf-v5.5.2/components/json/cJSON")
+idf_path = os.environ.get("IDF_PATH")
+if not idf_path:
+    raise SystemExit("Set IDF_PATH by sourcing ESP-IDF 5.5.2 export.sh before running this test.")
+IDF_JSON = Path(idf_path) / "components/json/cJSON"
+if not (IDF_JSON / "cJSON.h").is_file() or not (IDF_JSON / "cJSON.c").is_file():
+    raise SystemExit("IDF_PATH must point to ESP-IDF with components/json/cJSON sources.")
 CJSON_IMPL = IDF_JSON / "cJSON.c"
 BUILD_DIR = ROOT / "build/host_tests"
 BIN = BUILD_DIR / "motion_package_runner_host_test"
