@@ -9,6 +9,16 @@ config OTA_URL
         deployment endpoint at build time or through the "wifi/ota_url" runtime
         setting. Temporary relay addresses must never be compiled into firmware.
 
+config GOSHA_OTA_REHOME_FROM_BUILD
+    bool "Recover saved OTA route from the build-time URL"
+    default n
+    depends on BOARD_TYPE_GOSHA_V1
+    help
+        One-time recovery option for a device whose saved OTA endpoint no
+        longer works. Prefer the owner-supplied CONFIG_OTA_URL over the saved
+        wifi/ota_url and persist it only after a valid OTA response. Leave this
+        disabled in normal builds so user-configured endpoints keep priority.
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE

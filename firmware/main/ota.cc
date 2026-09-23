@@ -47,6 +47,13 @@ Ota::~Ota() {
 std::string Ota::GetCheckVersionUrl() {
     Settings settings("wifi", false);
     std::string url = settings.GetString("ota_url");
+#ifdef CONFIG_GOSHA_OTA_REHOME_FROM_BUILD
+    // This recovery build bypasses a stale saved route without erasing NVS.
+    // CheckVersion persists the replacement only after a valid server reply.
+    if (CONFIG_OTA_URL[0] != '\0') {
+        return CONFIG_OTA_URL;
+    }
+#endif
     if (url.empty()) {
         url = CONFIG_OTA_URL;
     }
@@ -119,6 +126,16 @@ esp_err_t Ota::CheckVersion() {
         ESP_LOGE(TAG, "Failed to parse JSON response");
         return ESP_ERR_INVALID_RESPONSE;
     }
+
+#ifdef CONFIG_GOSHA_OTA_REHOME_FROM_BUILD
+    if (url == CONFIG_OTA_URL) {
+        Settings settings("wifi", true);
+        if (settings.GetString("ota_url") != url) {
+            settings.SetString("ota_url", url);
+            ESP_LOGI(TAG, "Saved OTA route updated after valid server response");
+        }
+    }
+#endif
 
     has_activation_code_ = false;
     has_activation_challenge_ = false;
