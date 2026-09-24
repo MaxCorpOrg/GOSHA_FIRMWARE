@@ -26,6 +26,7 @@ using gosha::motion_live::MotionPackageStoreRecord;
 using gosha::motion_live::ServoSlot;
 using gosha::motion_live::kPoseJointCount;
 using gosha::motion_live::kMotionPackageStoreActiveKey;
+using gosha::motion_live::kMotionPackageStoreCatalogKey;
 using gosha::motion_live::kMotionPackageUploadMaxChunkBytes;
 using gosha::motion_live::kProtocol;
 using gosha::motion_live::kRightArmHomeDegrees;
@@ -1059,6 +1060,7 @@ int main() {
         CHECK(StringFieldEquals(reply, "status", "stored"));
         cJSON_Delete(reply);
 
+        backend.values.erase(kMotionPackageStoreCatalogKey);
         backend.values.erase(kMotionPackageStoreActiveKey);
         reply = Dispatch(&protocol, &profile, ListRequest(), false);
         CHECK(StringFieldEquals(reply, "op", "error"));

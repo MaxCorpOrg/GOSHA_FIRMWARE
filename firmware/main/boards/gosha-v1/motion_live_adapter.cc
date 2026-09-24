@@ -499,7 +499,7 @@ esp_err_t MotionLiveAdapter::SendCapabilities(const MotionLiveJsonSender& sender
     cJSON_AddBoolToObject(reply, "right_arm_initialized", caps.right_arm_initialized);
     cJSON* package_features = cJSON_CreateObject();
     if (package_features != nullptr) {
-        cJSON_AddNumberToObject(package_features, "store_slots", 2);
+        cJSON_AddNumberToObject(package_features, "store_slots", kMotionPackageStoreLibraryLimit);
         cJSON_AddBoolToObject(package_features, "list", true);
         cJSON_AddBoolToObject(package_features, "select", true);
         cJSON_AddBoolToObject(package_features, "delete_all", true);

@@ -18,13 +18,18 @@ bool Streq(const char* left, const char* right) {
 bool IsKnownKey(const char* key) {
     return Streq(key, kMotionPackageStoreSlotAKey) ||
            Streq(key, kMotionPackageStoreSlotBKey) ||
-           Streq(key, kMotionPackageStoreActiveKey);
+           Streq(key, kMotionPackageStoreSlotCKey) ||
+           Streq(key, kMotionPackageStoreSlotDKey) ||
+           Streq(key, kMotionPackageStoreActiveKey) ||
+           Streq(key, kMotionPackageStoreCatalogKey) ||
+           Streq(key, kMotionPackageStoreMigrationKey);
 }
 
 size_t MaxValueBytesForKey(const char* key) {
-    return Streq(key, kMotionPackageStoreActiveKey)
-               ? 1
-               : kMotionPackageStoreMaxRecordBytes;
+    if (Streq(key, kMotionPackageStoreActiveKey)) return 1;
+    if (Streq(key, kMotionPackageStoreCatalogKey)) return 6;
+    if (Streq(key, kMotionPackageStoreMigrationKey)) return 6;
+    return kMotionPackageStoreMaxRecordBytes;
 }
 
 bool Open(nvs_open_mode_t mode, nvs_handle_t* handle) {

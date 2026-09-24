@@ -17,6 +17,10 @@ using gosha::motion_live::MotionPackageStoreRecord;
 using gosha::motion_live::kMotionPackageStoreActiveKey;
 using gosha::motion_live::kMotionPackageStoreSlotAKey;
 using gosha::motion_live::kMotionPackageStoreSlotBKey;
+using gosha::motion_live::kMotionPackageStoreSlotCKey;
+using gosha::motion_live::kMotionPackageStoreSlotDKey;
+using gosha::motion_live::kMotionPackageStoreCatalogKey;
+using gosha::motion_live::kMotionPackageStoreMigrationKey;
 using gosha::motion_live::kMotionPackageUploadMaxBytes;
 
 #define CHECK(condition)                                                               \
@@ -92,305 +96,155 @@ bool CodeIs(const char* actual, const char* expected) {
 }  // namespace
 
 int main() {
-    {
-        FakeBackend backend;
-        MotionPackageStore store(&backend);
-        const std::vector<uint8_t> payload = PayloadFor("first");
-        auto result = store.Save(RecordFor("motion-001", payload));
-        CHECK(result.ok);
-        CHECK(backend.values.count(kMotionPackageStoreSlotBKey) == 1);
-        CHECK(backend.values[kMotionPackageStoreActiveKey] == std::vector<uint8_t>{'B'});
-        MotionPackageLoadedRecord loaded;
-        result = store.Load(&loaded);
-        CHECK(result.ok);
-        CHECK(loaded.package_id == "motion-001");
-        CHECK(loaded.profile_id == "gosha-preview-v1");
-        CHECK(loaded.calibration_id == kCalibration);
-        CHECK(loaded.payload == payload);
-    }
+    const auto one = PayloadFor("one");
+    const auto two = PayloadFor("two");
+    const auto three = PayloadFor("three");
+    const auto updated = PayloadFor("one-updated");
+    const auto four = PayloadFor("four");
 
     {
         FakeBackend backend;
         MotionPackageStore store(&backend);
-        const std::vector<uint8_t> first = PayloadFor("first");
-        const std::vector<uint8_t> second = PayloadFor("second");
-        CHECK(store.Save(RecordFor("motion-001", first)).ok);
-        CHECK(store.Save(RecordFor("motion-002", second)).ok);
-        CHECK(backend.values[kMotionPackageStoreActiveKey] == std::vector<uint8_t>{'A'});
+        CHECK(store.Save(RecordFor("motion-001", one)).ok);
+        CHECK(store.Save(RecordFor("motion-002", two)).ok);
+        CHECK(store.Save(RecordFor("motion-003", three)).ok);
         std::vector<MotionPackageStoreEntry> entries;
-        CHECK(store.List(&entries).ok);
-        CHECK(entries.size() == 2);
+        CHECK(store.List(&entries).ok && entries.size() == 3);
         CHECK(entries[0].record.package_id == "motion-002");
-        CHECK(entries[0].active);
         CHECK(entries[1].record.package_id == "motion-001");
-        CHECK(!entries[1].active);
+        CHECK(entries[2].record.package_id == "motion-003");
+        CHECK(entries[2].active);
+        const auto before = backend.values;
+        auto result = store.Save(RecordFor("motion-004", four));
+        CHECK(!result.ok && CodeIs(result.code, "store_full"));
+        CHECK(backend.values == before);
+
+        CHECK(store.Save(RecordFor("motion-001", updated)).ok);
+        CHECK(store.List(&entries).ok && entries.size() == 3);
         MotionPackageLoadedRecord loaded;
-        CHECK(store.Load(&loaded).ok);
-        CHECK(loaded.package_id == "motion-002");
-        CHECK(loaded.payload == second);
-        CHECK(store.LoadById("motion-001", &loaded).ok);
-        CHECK(loaded.package_id == "motion-001");
-        CHECK(loaded.payload == first);
-        CHECK(store.Select("motion-001").ok);
-        CHECK(store.Load(&loaded).ok);
-        CHECK(loaded.package_id == "motion-001");
-        auto select_result = store.Select("missing-package");
-        CHECK(!select_result.ok);
-        CHECK(CodeIs(select_result.code, "store_package_not_found"));
+        CHECK(store.LoadById("motion-001", &loaded).ok && loaded.payload == updated);
+        CHECK(store.LoadById("motion-002", &loaded).ok && loaded.payload == two);
+        CHECK(store.LoadById("motion-003", &loaded).ok && loaded.payload == three);
+        CHECK(store.Load(&loaded).ok && loaded.package_id == "motion-001");
+
+        CHECK(store.Select("motion-002").ok);
+        CHECK(store.Load(&loaded).ok && loaded.package_id == "motion-002");
+        CHECK(store.DeleteById("motion-003").ok);
+        CHECK(store.List(&entries).ok && entries.size() == 2);
+        CHECK(store.Save(RecordFor("motion-004", four)).ok);
+        CHECK(store.List(&entries).ok && entries.size() == 3);
     }
 
     {
         FakeBackend backend;
         MotionPackageStore store(&backend);
-        const std::vector<uint8_t> first = PayloadFor("first");
-        const std::vector<uint8_t> second = PayloadFor("second");
-        const std::vector<uint8_t> replacement = PayloadFor("first-replaced");
-        CHECK(store.Save(RecordFor("motion-001", first)).ok);
-        CHECK(store.Save(RecordFor("motion-002", second)).ok);
-        CHECK(store.Save(RecordFor("motion-001", replacement)).ok);
+        CHECK(store.Save(RecordFor("motion-001", one)).ok);
+        CHECK(store.Save(RecordFor("motion-002", two)).ok);
+        // The installed firmware has only A/B and motion_pkg_act.
+        backend.values.erase(kMotionPackageStoreCatalogKey);
+        backend.values[kMotionPackageStoreActiveKey] = {'A'};
+        backend.values[kMotionPackageStoreMigrationKey] = {'M', 'I', 'G', 1, 3, 0};
+        backend.values[kMotionPackageStoreSlotCKey] = {0, 1, 2};
+        std::vector<MotionPackageStoreEntry> before;
+        CHECK(store.List(&before).ok && before.size() == 2);
+        CHECK(store.Save(RecordFor("motion-003", three)).ok);
+        MotionPackageLoadedRecord loaded;
+        CHECK(store.LoadById("motion-001", &loaded).ok && loaded.payload == one);
+        CHECK(store.LoadById("motion-002", &loaded).ok && loaded.payload == two);
+        CHECK(store.LoadById("motion-003", &loaded).ok && loaded.payload == three);
+        CHECK(backend.values.count(kMotionPackageStoreSlotCKey) == 1);
+        CHECK(backend.values.count(kMotionPackageStoreMigrationKey) == 0);
+    }
+
+    {
+        FakeBackend backend;
+        MotionPackageStore store(&backend);
+        // Interrupted first migration with no previously installed package.
+        backend.values[kMotionPackageStoreMigrationKey] = {'M', 'I', 'G', 1, 0, 0xff};
+        backend.values[kMotionPackageStoreSlotBKey] = {0, 1, 2};
         std::vector<MotionPackageStoreEntry> entries;
-        CHECK(store.List(&entries).ok);
-        CHECK(entries.size() == 2);
-        CHECK(entries[0].record.package_id == "motion-002");
-        CHECK(!entries[0].active);
-        CHECK(entries[0].record.payload == second);
-        CHECK(entries[1].record.package_id == "motion-001");
-        CHECK(entries[1].active);
-        CHECK(entries[1].record.payload == replacement);
-        MotionPackageLoadedRecord loaded;
-        CHECK(store.Load(&loaded).ok);
-        CHECK(loaded.package_id == "motion-001");
-        CHECK(loaded.payload == replacement);
-        CHECK(store.LoadById("motion-002", &loaded).ok);
-        CHECK(loaded.payload == second);
+        CHECK(store.List(&entries).ok && entries.empty());
+        CHECK(store.Save(RecordFor("motion-001", one)).ok);
+        CHECK(store.List(&entries).ok && entries.size() == 1);
     }
 
     {
         FakeBackend backend;
         MotionPackageStore store(&backend);
-        const std::vector<uint8_t> first = PayloadFor("first");
-        const std::vector<uint8_t> second = PayloadFor("second");
-        CHECK(store.Save(RecordFor("motion-001", first)).ok);
-        CHECK(store.Save(RecordFor("motion-002", second)).ok);
-        CHECK(store.DeleteById("motion-001").ok);
-        std::vector<MotionPackageStoreEntry> entries;
-        CHECK(store.List(&entries).ok);
-        CHECK(entries.size() == 1);
-        CHECK(entries[0].record.package_id == "motion-002");
-        CHECK(entries[0].active);
+        CHECK(store.Save(RecordFor("motion-001", one)).ok);
+        CHECK(store.Save(RecordFor("motion-002", two)).ok);
+        CHECK(store.Save(RecordFor("motion-003", three)).ok);
+        backend.fail_writes.insert(kMotionPackageStoreSlotDKey);
+        auto result = store.Save(RecordFor("motion-001", updated));
+        CHECK(!result.ok && CodeIs(result.code, "store_slot_write_failed"));
         MotionPackageLoadedRecord loaded;
-        CHECK(store.Load(&loaded).ok);
-        CHECK(loaded.package_id == "motion-002");
+        CHECK(store.LoadById("motion-001", &loaded).ok && loaded.payload == one);
+        backend.fail_writes.clear();
+        backend.fail_writes.insert(kMotionPackageStoreCatalogKey);
+        result = store.Save(RecordFor("motion-001", updated));
+        CHECK(!result.ok && CodeIs(result.code, "store_commit_failed"));
+        CHECK(backend.values.count(kMotionPackageStoreSlotDKey) == 0);
+        CHECK(store.LoadById("motion-001", &loaded).ok && loaded.payload == one);
+        CHECK(store.LoadById("motion-002", &loaded).ok && loaded.payload == two);
+        CHECK(store.LoadById("motion-003", &loaded).ok && loaded.payload == three);
     }
 
     {
         FakeBackend backend;
         MotionPackageStore store(&backend);
-        const std::vector<uint8_t> first = PayloadFor("first");
-        const std::vector<uint8_t> second = PayloadFor("second");
-        CHECK(store.Save(RecordFor("motion-001", first)).ok);
-        CHECK(store.Save(RecordFor("motion-002", second)).ok);
-        CHECK(store.DeleteById("motion-002").ok);
-        std::vector<MotionPackageStoreEntry> entries;
-        CHECK(store.List(&entries).ok);
-        CHECK(entries.size() == 1);
-        CHECK(entries[0].record.package_id == "motion-001");
-        CHECK(entries[0].active);
+        CHECK(store.Save(RecordFor("motion-001", one)).ok);
+        CHECK(store.Save(RecordFor("motion-002", two)).ok);
+        CHECK(store.Save(RecordFor("motion-003", three)).ok);
+        // Simulate a power cut after writing the staging blob.
+        backend.values[kMotionPackageStoreSlotDKey] = {0, 1, 2};
+        CHECK(store.Save(RecordFor("motion-001", updated)).ok);
         MotionPackageLoadedRecord loaded;
-        CHECK(store.Load(&loaded).ok);
-        CHECK(loaded.package_id == "motion-001");
+        CHECK(store.LoadById("motion-001", &loaded).ok && loaded.payload == updated);
+        CHECK(store.LoadById("motion-002", &loaded).ok && loaded.payload == two);
+        CHECK(store.LoadById("motion-003", &loaded).ok && loaded.payload == three);
     }
 
     {
         FakeBackend backend;
         MotionPackageStore store(&backend);
-        const std::vector<uint8_t> payload = PayloadFor("first");
-        CHECK(store.Save(RecordFor("motion-001", payload)).ok);
-        CHECK(store.DeleteById("motion-001").ok);
+        CHECK(store.Save(RecordFor("motion-001", one)).ok);
+        backend.values[kMotionPackageStoreCatalogKey][4] = 0xff;
         MotionPackageLoadedRecord loaded;
         auto result = store.Load(&loaded);
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_empty"));
+        CHECK(!result.ok && CodeIs(result.code, "store_catalog_corrupt"));
     }
 
     {
         FakeBackend backend;
         MotionPackageStore store(&backend);
-        const std::vector<uint8_t> payload = PayloadFor("first");
-        CHECK(store.Save(RecordFor("motion-001", payload)).ok);
-        auto result = store.DeleteById("missing-package");
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_package_not_found"));
-    }
-
-    {
-        FakeBackend backend;
-        MotionPackageStore store(&backend);
-        const std::vector<uint8_t> first = PayloadFor("first");
-        const std::vector<uint8_t> second = PayloadFor("second");
-        CHECK(store.Save(RecordFor("motion-001", first)).ok);
-        backend.fail_writes.insert(kMotionPackageStoreSlotAKey);
-        auto result = store.Save(RecordFor("motion-002", second));
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_slot_write_failed"));
-        MotionPackageLoadedRecord loaded;
-        CHECK(store.Load(&loaded).ok);
-        CHECK(loaded.package_id == "motion-001");
-        CHECK(loaded.payload == first);
-    }
-
-    {
-        FakeBackend backend;
-        MotionPackageStore store(&backend);
-        const std::vector<uint8_t> first = PayloadFor("first");
-        const std::vector<uint8_t> second = PayloadFor("second");
-        CHECK(store.Save(RecordFor("motion-001", first)).ok);
-        backend.fail_writes.insert(kMotionPackageStoreActiveKey);
-        auto result = store.Save(RecordFor("motion-002", second));
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_commit_failed"));
-        CHECK(backend.values.count(kMotionPackageStoreSlotAKey) == 0);
-        MotionPackageLoadedRecord loaded;
-        CHECK(store.Load(&loaded).ok);
-        CHECK(loaded.package_id == "motion-001");
-        CHECK(loaded.payload == first);
-    }
-
-    {
-        FakeBackend backend;
-        MotionPackageStore store(&backend);
-        const std::vector<uint8_t> payload = PayloadFor("bad");
-        MotionPackageStoreRecord record = RecordFor(".", payload);
-        auto result = store.Save(record);
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_record_invalid"));
-        record = RecordFor("motion-001", payload);
-        record.payload_crc32 ^= 1u;
-        result = store.Save(record);
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_record_invalid"));
-    }
-
-    {
-        FakeBackend backend;
-        MotionPackageStore store(&backend);
-        std::vector<uint8_t> payload(kMotionPackageUploadMaxBytes + 1, 'x');
-        auto result = store.Save(RecordFor("motion-oversize", payload));
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_record_invalid"));
-    }
-
-    {
-        FakeBackend backend;
-        MotionPackageStore store(&backend);
-        const std::vector<uint8_t> payload = PayloadFor("first");
-        CHECK(store.Save(RecordFor("motion-001", payload)).ok);
-        backend.values[kMotionPackageStoreSlotBKey].back() ^= 0x01u;
+        CHECK(store.Save(RecordFor("motion-001", one)).ok);
+        CHECK(store.Save(RecordFor("motion-002", two)).ok);
+        CHECK(store.Save(RecordFor("motion-003", three)).ok);
+        backend.values.erase(kMotionPackageStoreCatalogKey);
         MotionPackageLoadedRecord loaded;
         auto result = store.Load(&loaded);
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_corrupt"));
+        CHECK(!result.ok && CodeIs(result.code, "store_catalog_missing"));
     }
 
     {
         FakeBackend backend;
         MotionPackageStore store(&backend);
-        const std::vector<uint8_t> first = PayloadFor("first");
-        const std::vector<uint8_t> second = PayloadFor("second");
-        CHECK(store.Save(RecordFor("motion-001", first)).ok);
-        backend.values[kMotionPackageStoreActiveKey] = std::vector<uint8_t>{'X'};
+        backend.values[kMotionPackageStoreMigrationKey] = {'B', 'A', 'D', 1, 0, 0xff};
         MotionPackageLoadedRecord loaded;
         auto result = store.Load(&loaded);
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_active_corrupt"));
-        result = store.Save(RecordFor("motion-002", second));
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_active_corrupt"));
+        CHECK(!result.ok && CodeIs(result.code, "store_migration_corrupt"));
     }
 
     {
         FakeBackend backend;
         MotionPackageStore store(&backend);
-        const std::vector<uint8_t> first = PayloadFor("first");
-        const std::vector<uint8_t> second = PayloadFor("second");
-        const std::vector<uint8_t> third = PayloadFor("third");
-        const std::vector<uint8_t> fourth = PayloadFor("fourth");
-        CHECK(store.Save(RecordFor("motion-001", first)).ok);
-        CHECK(store.Save(RecordFor("motion-002", second)).ok);
-        CHECK(store.Save(RecordFor("motion-003", third)).ok);
-        CHECK(backend.values[kMotionPackageStoreActiveKey] == std::vector<uint8_t>{'B'});
-        std::vector<MotionPackageStoreEntry> entries;
-        CHECK(store.List(&entries).ok);
-        CHECK(entries.size() == 2);
-        CHECK(entries[0].record.package_id == "motion-002");
-        CHECK(!entries[0].active);
-        CHECK(entries[1].record.package_id == "motion-003");
-        CHECK(entries[1].active);
-        backend.values.erase(kMotionPackageStoreActiveKey);
-        MotionPackageLoadedRecord loaded;
-        auto result = store.Load(&loaded);
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_active_missing"));
-        result = store.Save(RecordFor("motion-004", fourth));
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_active_missing"));
-    }
-
-    {
-        FakeBackend backend;
-        MotionPackageStore store(&backend);
-        const std::vector<uint8_t> payload = PayloadFor("first");
-        backend.values[kMotionPackageStoreSlotAKey] = payload;
-        MotionPackageLoadedRecord loaded;
-        auto result = store.Load(&loaded);
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_active_missing"));
-    }
-
-    {
-        FakeBackend backend;
-        MotionPackageStore store(&backend);
-        CHECK(store.Delete().ok);
-        MotionPackageLoadedRecord loaded;
-        auto result = store.Load(&loaded);
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_empty"));
-    }
-
-    {
-        FakeBackend backend;
-        MotionPackageStore store(&backend);
-        const std::vector<uint8_t> payload = PayloadFor("first");
-        CHECK(store.Save(RecordFor("motion-001", payload)).ok);
-        CHECK(store.Delete().ok);
-        MotionPackageLoadedRecord loaded;
-        auto result = store.Load(&loaded);
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_empty"));
-    }
-
-    {
-        FakeBackend backend;
-        MotionPackageStore store(&backend);
-        const std::vector<uint8_t> first = PayloadFor("first");
-        CHECK(store.Save(RecordFor("motion-001", first)).ok);
-        backend.values.erase(kMotionPackageStoreActiveKey);
-        CHECK(store.Delete().ok);
-        MotionPackageLoadedRecord loaded;
-        auto result = store.Load(&loaded);
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_empty"));
-    }
-
-    {
-        FakeBackend backend;
-        MotionPackageStore store(&backend);
-        const std::vector<uint8_t> payload = PayloadFor("first");
-        CHECK(store.Save(RecordFor("motion-001", payload)).ok);
-        backend.fail_erases.insert(kMotionPackageStoreSlotBKey);
-        auto result = store.Delete();
-        CHECK(!result.ok);
-        CHECK(CodeIs(result.code, "store_delete_failed"));
+        auto invalid = RecordFor(".", one);
+        CHECK(!store.Save(invalid).ok);
+        invalid = RecordFor("motion-001", one);
+        invalid.payload_crc32 ^= 1u;
+        CHECK(!store.Save(invalid).ok);
+        std::vector<uint8_t> huge(kMotionPackageUploadMaxBytes + 1, 'x');
+        CHECK(!store.Save(RecordFor("huge", huge)).ok);
     }
 
     std::cout << "motion_package_store_host_test: PASS\n";

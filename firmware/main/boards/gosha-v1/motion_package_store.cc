@@ -15,11 +15,23 @@ bool Streq(const char* left, const char* right) {
 }
 
 const char* SlotForIndex(int index) {
-    return index == 0 ? kMotionPackageStoreSlotAKey : kMotionPackageStoreSlotBKey;
+    constexpr const char* slots[] = {kMotionPackageStoreSlotAKey, kMotionPackageStoreSlotBKey,
+                                     kMotionPackageStoreSlotCKey, kMotionPackageStoreSlotDKey};
+    return index >= 0 && index < 4 ? slots[index] : nullptr;
 }
 
-uint8_t ActiveValueForSlot(const char* slot) {
-    return Streq(slot, kMotionPackageStoreSlotBKey) ? 'B' : 'A';
+constexpr uint8_t kCatalogMagic[] = {'G', 'M', 'I', 1};
+constexpr uint8_t kMigrationMagic[] = {'M', 'I', 'G', 1};
+constexpr int kSlotCount = 4;
+
+int IndexForActiveValue(uint8_t value) {
+    return value == 'A' ? 0 : value == 'B' ? 1 : -1;
+}
+
+int CountSlots(uint8_t mask) {
+    int count = 0;
+    for (int i = 0; i < kSlotCount; ++i) count += (mask >> i) & 1;
+    return count;
 }
 
 bool IsHex64(const char* value) {
@@ -205,190 +217,225 @@ bool DeserializeRecord(const std::vector<uint8_t>& input,
 
 }  // namespace
 
-MotionPackageStore::ActiveSlotStatus MotionPackageStore::ReadActiveSlot(
-    const char** active_slot) {
-    if (backend_ == nullptr || active_slot == nullptr) {
-        return ActiveSlotStatus::kCorrupt;
+MotionPackageStoreResult MotionPackageStore::ReadCatalog(Catalog* catalog) {
+    if (backend_ == nullptr || catalog == nullptr) return Error("store_backend_missing");
+    *catalog = {};
+    std::vector<uint8_t> raw;
+    if (backend_->Read(kMotionPackageStoreCatalogKey, &raw)) {
+        if (raw.size() != 6 ||
+            std::memcmp(raw.data(), kCatalogMagic, sizeof(kCatalogMagic)) != 0 ||
+            (raw[4] & 0xf0u) != 0 ||
+            CountSlots(raw[4]) > static_cast<int>(kMotionPackageStoreLibraryLimit) ||
+            (raw[4] == 0 ? raw[5] != 0xff :
+             raw[5] >= kSlotCount || (raw[4] & (1u << raw[5])) == 0)) {
+            return Error("store_catalog_corrupt");
+        }
+        catalog->mask = raw[4];
+        catalog->active = raw[5];
+        return Ok();
     }
-    *active_slot = nullptr;
+
+    std::vector<uint8_t> migration;
+    const bool migrating = backend_->Read(kMotionPackageStoreMigrationKey, &migration);
+    if (migrating &&
+        (migration.size() != 6 ||
+         std::memcmp(migration.data(), kMigrationMagic, sizeof(kMigrationMagic)) != 0 ||
+         (migration[4] & ~3u) != 0 ||
+         (migration[4] == 0 ? migration[5] != 0xff :
+          migration[5] >= 2 || (migration[4] & (1u << migration[5])) == 0)))
+        return Error("store_migration_corrupt");
+    // C/D without the migration marker mean the indexed catalog was lost.
+    if (!migrating && (SlotExists(kMotionPackageStoreSlotCKey) ||
+                       SlotExists(kMotionPackageStoreSlotDKey)))
+        return Error("store_catalog_missing");
+
+    // The accepted firmware stores records in A/B and the active pointer
+    // separately. Read that layout without modifying either payload.
+    catalog->legacy = true;
     std::vector<uint8_t> active;
-    if (!backend_->Read(kMotionPackageStoreActiveKey, &active)) {
-        return ActiveSlotStatus::kMissing;
+    const bool has_active = backend_->Read(kMotionPackageStoreActiveKey, &active);
+    const bool has_a = SlotExists(kMotionPackageStoreSlotAKey);
+    const bool has_b = SlotExists(kMotionPackageStoreSlotBKey);
+    if (migrating) {
+        catalog->mask = migration[4];
+        catalog->active = migration[5];
+        if (((catalog->mask & 1u) && !has_a) ||
+            ((catalog->mask & 2u) && !has_b))
+            return Error("store_migration_missing");
+        return Ok();
     }
-    if (active.size() == 1 && active[0] == 'A') {
-        *active_slot = kMotionPackageStoreSlotAKey;
-        return ActiveSlotStatus::kFound;
+    if (!has_active) {
+        return has_a || has_b ? Error("store_active_missing") : Ok();
     }
-    if (active.size() == 1 && active[0] == 'B') {
-        *active_slot = kMotionPackageStoreSlotBKey;
-        return ActiveSlotStatus::kFound;
-    }
-    return ActiveSlotStatus::kCorrupt;
+    if (active.size() != 1 || IndexForActiveValue(active[0]) < 0)
+        return Error("store_active_corrupt");
+    catalog->active = static_cast<uint8_t>(IndexForActiveValue(active[0]));
+    catalog->mask = (has_a ? 1u : 0u) | (has_b ? 2u : 0u);
+    if ((catalog->mask & (1u << catalog->active)) == 0)
+        return Error("store_active_missing");
+    return Ok();
+}
+
+bool MotionPackageStore::WriteCatalog(const Catalog& catalog) {
+    if (backend_ == nullptr) return false;
+    const std::vector<uint8_t> raw = {'G', 'M', 'I', 1, catalog.mask, catalog.active};
+    return backend_->Write(kMotionPackageStoreCatalogKey, raw);
 }
 
 bool MotionPackageStore::SlotExists(const char* slot) {
-    if (backend_ == nullptr || slot == nullptr) {
-        return false;
-    }
     std::vector<uint8_t> value;
-    return backend_->Read(slot, &value);
+    return backend_ != nullptr && slot != nullptr && backend_->Read(slot, &value);
 }
 
 MotionPackageStoreResult MotionPackageStore::LoadSlot(
     const char* slot, MotionPackageLoadedRecord* record) {
-    if (backend_ == nullptr || slot == nullptr || record == nullptr) {
+    if (backend_ == nullptr || slot == nullptr || record == nullptr)
         return Error("store_backend_missing");
-    }
     std::vector<uint8_t> serialized;
-    if (!backend_->Read(slot, &serialized)) {
-        return Error("store_slot_missing");
+    if (!backend_->Read(slot, &serialized)) return Error("store_slot_missing");
+    return DeserializeRecord(serialized, record) ? Ok() : Error("store_corrupt");
+}
+
+MotionPackageStoreResult MotionPackageStore::ValidateCatalog(const Catalog& catalog) {
+    std::vector<std::string> ids;
+    for (int i = 0; i < kSlotCount; ++i) {
+        if ((catalog.mask & (1u << i)) == 0) continue;
+        MotionPackageLoadedRecord loaded;
+        const auto result = LoadSlot(SlotForIndex(i), &loaded);
+        if (!result.ok) return result;
+        for (const auto& id : ids)
+            if (id == loaded.package_id) return Error("store_duplicate_id");
+        ids.push_back(loaded.package_id);
     }
-    MotionPackageLoadedRecord loaded;
-    if (!DeserializeRecord(serialized, &loaded)) {
-        return Error("store_corrupt");
-    }
-    *record = loaded;
     return Ok();
-}
-
-const char* MotionPackageStore::InactiveSlotFor(const char* active_slot) const {
-    return Streq(active_slot, kMotionPackageStoreSlotAKey)
-               ? kMotionPackageStoreSlotBKey
-               : kMotionPackageStoreSlotAKey;
-}
-
-bool MotionPackageStore::WriteActiveSlot(const char* active_slot) {
-    if (backend_ == nullptr || active_slot == nullptr) {
-        return false;
-    }
-    const std::vector<uint8_t> active_value = {ActiveValueForSlot(active_slot)};
-    return backend_->Write(kMotionPackageStoreActiveKey, active_value);
 }
 
 MotionPackageStoreResult MotionPackageStore::Save(
     const MotionPackageStoreRecord& record) {
-    if (backend_ == nullptr) {
-        return Error("store_backend_missing");
-    }
+    if (backend_ == nullptr) return Error("store_backend_missing");
     std::vector<uint8_t> serialized;
-    if (!SerializeRecord(record, &serialized)) {
-        return Error("store_record_invalid");
+    if (!SerializeRecord(record, &serialized)) return Error("store_record_invalid");
+
+    Catalog catalog;
+    auto result = ReadCatalog(&catalog);
+    if (!result.ok) return result;
+    result = ValidateCatalog(catalog);
+    if (!result.ok) return result;
+
+    int old_slot = -1;
+    for (int i = 0; i < kSlotCount; ++i) {
+        if ((catalog.mask & (1u << i)) == 0) continue;
+        MotionPackageLoadedRecord loaded;
+        result = LoadSlot(SlotForIndex(i), &loaded);
+        if (!result.ok) return result;
+        if (loaded.package_id == record.package_id) old_slot = i;
     }
-    const char* active_slot = nullptr;
-    const auto active_status = ReadActiveSlot(&active_slot);
-    if (active_status == ActiveSlotStatus::kCorrupt) {
-        return Error("store_active_corrupt");
+    if (old_slot < 0 &&
+        CountSlots(catalog.mask) >= static_cast<int>(kMotionPackageStoreLibraryLimit))
+        return Error("store_full");
+
+    if (catalog.legacy) {
+        const std::vector<uint8_t> marker = {'M', 'I', 'G', 1,
+                                             catalog.mask, catalog.active};
+        if (!backend_->Write(kMotionPackageStoreMigrationKey, marker))
+            return Error("store_migration_write_failed");
+    } else if (SlotExists(kMotionPackageStoreMigrationKey) &&
+               !backend_->Erase(kMotionPackageStoreMigrationKey)) {
+        return Error("store_migration_cleanup_failed");
     }
-    if (active_status == ActiveSlotStatus::kMissing &&
-        (SlotExists(kMotionPackageStoreSlotAKey) ||
-         SlotExists(kMotionPackageStoreSlotBKey))) {
-        return Error("store_active_missing");
-    }
-    const char* inactive_slot = active_status == ActiveSlotStatus::kFound
-                                    ? InactiveSlotFor(active_slot)
-                                    : kMotionPackageStoreSlotBKey;
-    if (!backend_->Write(inactive_slot, serialized)) {
-        return Error("store_slot_write_failed");
-    }
-    if (!WriteActiveSlot(inactive_slot)) {
-        backend_->Erase(inactive_slot);
-        return Error("store_commit_failed");
-    }
-    if (active_status == ActiveSlotStatus::kFound) {
-        MotionPackageLoadedRecord previous;
-        const MotionPackageStoreResult previous_result =
-            LoadSlot(active_slot, &previous);
-        if (previous_result.ok && previous.package_id == record.package_id) {
-            backend_->Erase(active_slot);
+
+    // A spare slot keeps the old version intact until the catalog commit.
+    // On first migration prefer C/D so failed writes cannot alter legacy A/B.
+    int free_slot = -1;
+    const int first_candidate = catalog.legacy
+                                    ? (catalog.mask == 0 ? 1 : 2)
+                                    : 0;
+    for (int i = first_candidate; i < kSlotCount; ++i) {
+        if ((catalog.mask & (1u << i)) == 0) {
+            free_slot = i;
+            break;
         }
     }
+    if (free_slot < 0) return Error("store_full");
+    const char* key = SlotForIndex(free_slot);
+    if (SlotExists(key) && !backend_->Erase(key))
+        return Error("store_staging_cleanup_failed");
+    if (!backend_->Write(key, serialized)) return Error("store_slot_write_failed");
+    MotionPackageLoadedRecord verified;
+    result = LoadSlot(key, &verified);
+    if (!result.ok || verified.package_id != record.package_id ||
+        verified.payload_crc32 != record.payload_crc32 ||
+        verified.payload.size() != record.payload_size ||
+        std::memcmp(verified.payload.data(), record.payload, record.payload_size) != 0) {
+        backend_->Erase(key);
+        return Error("store_verify_failed");
+    }
+
+    Catalog next = catalog;
+    next.legacy = false;
+    next.mask = static_cast<uint8_t>((catalog.mask & ~(old_slot < 0 ? 0u : (1u << old_slot))) |
+                                     (1u << free_slot));
+    next.active = static_cast<uint8_t>(free_slot);
+    if (!WriteCatalog(next)) {
+        backend_->Erase(key);
+        return Error("store_commit_failed");
+    }
+    // Keep the old slots until the marker is gone; a power cut before this
+    // point can still reconstruct exactly the old legacy catalog.
+    if (catalog.legacy && !backend_->Erase(kMotionPackageStoreMigrationKey))
+        return Error("store_migration_cleanup_failed");
+    if (free_slot < 2) {
+        const std::vector<uint8_t> legacy_active = {
+            static_cast<uint8_t>('A' + free_slot)};
+        backend_->Write(kMotionPackageStoreActiveKey, legacy_active);
+    }
+    if (old_slot >= 0) backend_->Erase(SlotForIndex(old_slot));
     return Ok();
 }
 
 MotionPackageStoreResult MotionPackageStore::List(
     std::vector<MotionPackageStoreEntry>* entries) {
-    if (backend_ == nullptr || entries == nullptr) {
-        return Error("store_backend_missing");
-    }
+    if (entries == nullptr) return Error("store_backend_missing");
     entries->clear();
-    const char* active_slot = nullptr;
-    const auto active_status = ReadActiveSlot(&active_slot);
-    if (active_status == ActiveSlotStatus::kCorrupt) {
-        return Error("store_active_corrupt");
-    }
-    if (active_status == ActiveSlotStatus::kMissing) {
-        return SlotExists(kMotionPackageStoreSlotAKey) ||
-                       SlotExists(kMotionPackageStoreSlotBKey)
-                   ? Error("store_active_missing")
-                   : Ok();
-    }
-
-    bool active_found = false;
-    for (int index = 0; index < 2; ++index) {
-        const char* slot = SlotForIndex(index);
-        if (!SlotExists(slot)) {
-            continue;
-        }
-        MotionPackageLoadedRecord loaded;
-        const MotionPackageStoreResult result = LoadSlot(slot, &loaded);
+    Catalog catalog;
+    auto result = ReadCatalog(&catalog);
+    if (!result.ok) return result;
+    result = ValidateCatalog(catalog);
+    if (!result.ok) return result;
+    for (int i = 0; i < kSlotCount; ++i) {
+        if ((catalog.mask & (1u << i)) == 0) continue;
+        MotionPackageStoreEntry entry;
+        result = LoadSlot(SlotForIndex(i), &entry.record);
         if (!result.ok) {
             entries->clear();
             return result;
         }
-        MotionPackageStoreEntry entry;
-        entry.active = Streq(slot, active_slot);
-        entry.record = loaded;
-        active_found = active_found || entry.active;
-        entries->push_back(entry);
-    }
-    if (!active_found) {
-        entries->clear();
-        return Error("store_active_missing");
+        entry.active = catalog.active == i;
+        entries->push_back(std::move(entry));
     }
     return Ok();
 }
 
 MotionPackageStoreResult MotionPackageStore::Load(
     MotionPackageLoadedRecord* record) {
-    if (backend_ == nullptr || record == nullptr) {
-        return Error("store_backend_missing");
-    }
-    const char* active_slot = nullptr;
-    const auto active_status = ReadActiveSlot(&active_slot);
-    if (active_status == ActiveSlotStatus::kCorrupt) {
-        return Error("store_active_corrupt");
-    }
-    if (active_status == ActiveSlotStatus::kMissing) {
-        return SlotExists(kMotionPackageStoreSlotAKey) ||
-                       SlotExists(kMotionPackageStoreSlotBKey)
-                   ? Error("store_active_missing")
-                   : Error("store_empty");
-    }
-    MotionPackageLoadedRecord loaded;
-    const MotionPackageStoreResult result = LoadSlot(active_slot, &loaded);
-    if (!result.ok && std::strcmp(result.code, "store_slot_missing") == 0) {
-        const char* inactive_slot = InactiveSlotFor(active_slot);
-        return SlotExists(inactive_slot) ? Error("store_corrupt")
-                                         : Error("store_empty");
-    }
-    if (!result.ok) {
-        return result;
-    }
-    *record = loaded;
-    return Ok();
+    if (record == nullptr) return Error("store_backend_missing");
+    Catalog catalog;
+    auto result = ReadCatalog(&catalog);
+    if (!result.ok) return result;
+    result = ValidateCatalog(catalog);
+    if (!result.ok) return result;
+    if (catalog.mask == 0) return Error("store_empty");
+    return LoadSlot(SlotForIndex(catalog.active), record);
 }
 
 MotionPackageStoreResult MotionPackageStore::LoadById(
     const char* package_id, MotionPackageLoadedRecord* record) {
-    if (!IsSafePackageId(package_id) || record == nullptr) {
+    if (!IsSafePackageId(package_id) || record == nullptr)
         return Error("store_package_id_invalid");
-    }
     std::vector<MotionPackageStoreEntry> entries;
-    const MotionPackageStoreResult result = List(&entries);
-    if (!result.ok) {
-        return result;
-    }
-    for (const MotionPackageStoreEntry& entry : entries) {
+    const auto result = List(&entries);
+    if (!result.ok) return result;
+    for (const auto& entry : entries) {
         if (entry.record.package_id == package_id) {
             *record = entry.record;
             return Ok();
@@ -398,127 +445,72 @@ MotionPackageStoreResult MotionPackageStore::LoadById(
 }
 
 MotionPackageStoreResult MotionPackageStore::Select(const char* package_id) {
-    if (backend_ == nullptr) {
-        return Error("store_backend_missing");
-    }
-    if (!IsSafePackageId(package_id)) {
-        return Error("store_package_id_invalid");
-    }
-    const char* active_slot = nullptr;
-    const auto active_status = ReadActiveSlot(&active_slot);
-    if (active_status == ActiveSlotStatus::kCorrupt) {
-        return Error("store_active_corrupt");
-    }
-    if (active_status == ActiveSlotStatus::kMissing) {
-        return SlotExists(kMotionPackageStoreSlotAKey) ||
-                       SlotExists(kMotionPackageStoreSlotBKey)
-                   ? Error("store_active_missing")
-                   : Error("store_package_not_found");
-    }
-
-    const char* selected_slot = nullptr;
-    bool active_found = false;
-    for (int index = 0; index < 2; ++index) {
-        const char* slot = SlotForIndex(index);
-        if (!SlotExists(slot)) {
-            continue;
-        }
+    if (!IsSafePackageId(package_id)) return Error("store_package_id_invalid");
+    Catalog catalog;
+    auto result = ReadCatalog(&catalog);
+    if (!result.ok) return result;
+    result = ValidateCatalog(catalog);
+    if (!result.ok) return result;
+    for (int i = 0; i < kSlotCount; ++i) {
+        if ((catalog.mask & (1u << i)) == 0) continue;
         MotionPackageLoadedRecord loaded;
-        const MotionPackageStoreResult result = LoadSlot(slot, &loaded);
-        if (!result.ok) {
-            return result;
+        result = LoadSlot(SlotForIndex(i), &loaded);
+        if (!result.ok) return result;
+        if (loaded.package_id != package_id) continue;
+        if (catalog.legacy) {
+            const std::vector<uint8_t> active = {static_cast<uint8_t>('A' + i)};
+            return backend_->Write(kMotionPackageStoreActiveKey, active)
+                       ? Ok() : Error("store_commit_failed");
         }
-        active_found = active_found || Streq(slot, active_slot);
-        if (loaded.package_id == package_id) {
-            selected_slot = slot;
-        }
+        catalog.active = static_cast<uint8_t>(i);
+        return WriteCatalog(catalog) ? Ok() : Error("store_commit_failed");
     }
-    if (!active_found) {
-        return Error("store_active_missing");
-    }
-    if (selected_slot == nullptr) {
-        return Error("store_package_not_found");
-    }
-    return WriteActiveSlot(selected_slot) ? Ok() : Error("store_commit_failed");
+    return Error("store_package_not_found");
 }
 
 MotionPackageStoreResult MotionPackageStore::Delete() {
-    if (backend_ == nullptr) {
-        return Error("store_backend_missing");
-    }
-    const bool erased_active = backend_->Erase(kMotionPackageStoreActiveKey);
-    const bool erased_a = backend_->Erase(kMotionPackageStoreSlotAKey);
-    const bool erased_b = backend_->Erase(kMotionPackageStoreSlotBKey);
-    return erased_active && erased_a && erased_b ? Ok() : Error("store_delete_failed");
+    if (backend_ == nullptr) return Error("store_backend_missing");
+    Catalog empty;
+    if (!WriteCatalog(empty)) return Error("store_commit_failed");
+    bool ok = backend_->Erase(kMotionPackageStoreActiveKey);
+    ok = backend_->Erase(kMotionPackageStoreMigrationKey) && ok;
+    for (int i = 0; i < kSlotCount; ++i)
+        ok = backend_->Erase(SlotForIndex(i)) && ok;
+    return ok ? Ok() : Error("store_delete_failed");
 }
 
 MotionPackageStoreResult MotionPackageStore::DeleteById(const char* package_id) {
-    if (backend_ == nullptr) {
-        return Error("store_backend_missing");
-    }
-    if (!IsSafePackageId(package_id)) {
-        return Error("store_package_id_invalid");
-    }
-
-    const char* active_slot = nullptr;
-    const auto active_status = ReadActiveSlot(&active_slot);
-    if (active_status == ActiveSlotStatus::kCorrupt) {
-        return Error("store_active_corrupt");
-    }
-    if (active_status == ActiveSlotStatus::kMissing) {
-        return SlotExists(kMotionPackageStoreSlotAKey) ||
-                       SlotExists(kMotionPackageStoreSlotBKey)
-                   ? Error("store_active_missing")
-                   : Error("store_package_not_found");
-    }
-
-    const char* selected_slot = nullptr;
-    const char* replacement_slot = nullptr;
-    bool active_found = false;
-    for (int index = 0; index < 2; ++index) {
-        const char* slot = SlotForIndex(index);
-        if (!SlotExists(slot)) {
-            continue;
-        }
+    if (!IsSafePackageId(package_id)) return Error("store_package_id_invalid");
+    Catalog catalog;
+    auto result = ReadCatalog(&catalog);
+    if (!result.ok) return result;
+    result = ValidateCatalog(catalog);
+    if (!result.ok) return result;
+    int selected = -1;
+    for (int i = 0; i < kSlotCount; ++i) {
+        if ((catalog.mask & (1u << i)) == 0) continue;
         MotionPackageLoadedRecord loaded;
-        const MotionPackageStoreResult result = LoadSlot(slot, &loaded);
-        if (!result.ok) {
-            return result;
-        }
-        const bool slot_active = Streq(slot, active_slot);
-        active_found = active_found || slot_active;
-        if (loaded.package_id == package_id) {
-            selected_slot = slot;
-        } else if (replacement_slot == nullptr) {
-            replacement_slot = slot;
-        }
+        result = LoadSlot(SlotForIndex(i), &loaded);
+        if (!result.ok) return result;
+        if (loaded.package_id == package_id) selected = i;
     }
-    if (!active_found) {
-        return Error("store_active_missing");
-    }
-    if (selected_slot == nullptr) {
-        return Error("store_package_not_found");
-    }
+    if (selected < 0) return Error("store_package_not_found");
 
-    if (Streq(selected_slot, active_slot)) {
-        if (replacement_slot != nullptr && !WriteActiveSlot(replacement_slot)) {
-            return Error("store_commit_failed");
-        }
-        const bool erased_selected = backend_->Erase(selected_slot);
-        if (!erased_selected) {
-            if (replacement_slot != nullptr) {
-                WriteActiveSlot(selected_slot);
+    Catalog next = catalog;
+    next.legacy = false;
+    next.mask = static_cast<uint8_t>(catalog.mask & ~(1u << selected));
+    if (next.mask == 0) {
+        next.active = 0xff;
+    } else if (catalog.active == selected) {
+        for (int i = 0; i < kSlotCount; ++i)
+            if (next.mask & (1u << i)) {
+                next.active = static_cast<uint8_t>(i);
+                break;
             }
-            return Error("store_delete_failed");
-        }
-        if (replacement_slot == nullptr &&
-            !backend_->Erase(kMotionPackageStoreActiveKey)) {
-            return Error("store_delete_failed");
-        }
-        return Ok();
     }
-
-    return backend_->Erase(selected_slot) ? Ok() : Error("store_delete_failed");
+    if (!WriteCatalog(next)) return Error("store_commit_failed");
+    // A failed erase leaves an unreachable blob, never a visible package.
+    return backend_->Erase(SlotForIndex(selected)) ? Ok() : Error("store_delete_failed");
 }
 
 }  // namespace gosha::motion_live

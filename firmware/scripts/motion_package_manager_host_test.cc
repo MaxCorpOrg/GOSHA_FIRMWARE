@@ -15,6 +15,7 @@ using gosha::motion_live::MotionPackageStoreEntry;
 using gosha::motion_live::MotionPackageStoreBackend;
 using gosha::motion_live::MotionPackageUploadBegin;
 using gosha::motion_live::kMotionPackageStoreActiveKey;
+using gosha::motion_live::kMotionPackageStoreCatalogKey;
 using gosha::motion_live::kMotionPackageStoreSlotAKey;
 using gosha::motion_live::kMotionPackageStoreSlotBKey;
 
@@ -171,7 +172,7 @@ int main() {
         CHECK(manager.BeginUpload(profile, BeginFor("motion-001", first)).ok);
         CHECK(manager.AppendUpload({0, first.data(), first.size()}).ok);
         CHECK(manager.FinishUpload().ok);
-        backend.fail_writes.insert(kMotionPackageStoreActiveKey);
+        backend.fail_writes.insert(kMotionPackageStoreCatalogKey);
         auto result = manager.BeginUpload(profile, BeginFor("motion-002", second));
         CHECK(result.ok);
         result = manager.AppendUpload({0, second.data(), second.size()});
@@ -301,6 +302,7 @@ int main() {
         CHECK(manager.BeginUpload(profile, BeginFor("motion-001", payload)).ok);
         CHECK(manager.AppendUpload({0, payload.data(), payload.size()}).ok);
         CHECK(manager.FinishUpload().ok);
+        backend.values.erase(kMotionPackageStoreCatalogKey);
         backend.values.erase(kMotionPackageStoreActiveKey);
         MotionPackageLoadedRecord loaded;
         auto result = manager.Load(&loaded);
