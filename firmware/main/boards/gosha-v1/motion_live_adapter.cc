@@ -2,9 +2,11 @@
 #include "motion_live_auth.h"
 
 #include <esp_log.h>
+#include <esp_attr.h>
 #include <esp_random.h>
 #include <esp_system.h>
 #include <esp_timer.h>
+#include <freertos/task.h>
 #include <mbedtls/md.h>
 
 #include <cmath>
@@ -26,6 +28,30 @@ namespace {
 
 constexpr const char* TAG = "MotionLive";
 constexpr int64_t kWatchdogTickPeriodUs = 10 * 1000;
+constexpr uint32_t kCrashTraceMagic = 0x4d4c5631;
+enum LiveCrashStage : uint32_t {
+    kStageIdle = 0,
+    kStageTimerTick = 1,
+    kStageLivePose = 2,
+};
+struct LiveCrashTrace {
+    uint32_t magic;
+    uint32_t stage;
+    uint32_t timer_stack_min_bytes;
+    uint32_t pose_stack_min_bytes;
+};
+RTC_NOINIT_ATTR LiveCrashTrace g_live_crash_trace;
+LiveCrashTrace g_previous_live_crash_trace{};
+
+// RTC noinit survives a panic reset without writing NVS. The last active
+// stage and low-water stack margins are available in the next read-only hello.
+void RecordLiveCrashStage(LiveCrashStage stage, bool timer_task) {
+    g_live_crash_trace.stage = stage;
+    const uint32_t free_bytes = uxTaskGetStackHighWaterMark(nullptr);
+    uint32_t& minimum = timer_task ? g_live_crash_trace.timer_stack_min_bytes
+                                   : g_live_crash_trace.pose_stack_min_bytes;
+    if (free_bytes < minimum) minimum = free_bytes;
+}
 
 MotionLiveResult RuntimeBusyResult() {
     MotionLiveResult result;
@@ -318,6 +344,10 @@ MotionLiveAdapter::MotionLiveAdapter()
                         [this]() { return GenerateSessionId(); },
                         [this]() { return NowMs(); }),
       robot_motion_runtime_(&package_manager_) {
+    if (g_live_crash_trace.magic == kCrashTraceMagic) {
+        g_previous_live_crash_trace = g_live_crash_trace;
+    }
+    g_live_crash_trace = {kCrashTraceMagic, kStageIdle, UINT32_MAX, UINT32_MAX};
     core_.SetLocalOptInEnabled(LocalOptInEnabled());
     core_.SetPreparedProfile(PreparedProfileOrNull());
 }
@@ -372,14 +402,19 @@ void MotionLiveAdapter::WatchdogTick() {
     MotionLiveTickResult result;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        RecordLiveCrashStage(kStageTimerTick, true);
         const uint64_t now_ms = NowMs();
         robot_motion_runtime_.Tick(&core_, now_ms);
         // Keep the accepted Studio/package clock at 50 ms. Ordinary Otto
         // choreography uses its original 10 ms movement interpolation clock.
-        if (now_ms >= last_editor_tick_ms_ && now_ms - last_editor_tick_ms_ < 50) return;
+        if (now_ms >= last_editor_tick_ms_ && now_ms - last_editor_tick_ms_ < 50) {
+            g_live_crash_trace.stage = kStageIdle;
+            return;
+        }
         last_editor_tick_ms_ = now_ms;
         package_protocol_.TickHardwareRun(&core_, now_ms);
         result = core_.Tick(now_ms);
+        g_live_crash_trace.stage = kStageIdle;
     }
     if (result.stopped) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -494,6 +529,32 @@ esp_err_t MotionLiveAdapter::SendCapabilities(const MotionLiveJsonSender& sender
                             ResetReasonName(reset_reason));
     cJSON_AddNumberToObject(reply, "last_reset_reason_code",
                             static_cast<int>(reset_reason));
+    cJSON* crash_trace = cJSON_CreateObject();
+    if (crash_trace != nullptr) {
+        LiveCrashTrace current_trace;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            current_trace = g_live_crash_trace;
+        }
+        const bool valid = g_previous_live_crash_trace.magic == kCrashTraceMagic &&
+                           (reset_reason == ESP_RST_PANIC || reset_reason == ESP_RST_TASK_WDT ||
+                            reset_reason == ESP_RST_INT_WDT || reset_reason == ESP_RST_WDT);
+        cJSON_AddNumberToObject(crash_trace, "previous_stage",
+                                valid ? g_previous_live_crash_trace.stage : 0);
+        cJSON_AddNumberToObject(crash_trace, "previous_timer_stack_min_bytes",
+                                valid && g_previous_live_crash_trace.timer_stack_min_bytes != UINT32_MAX
+                                    ? g_previous_live_crash_trace.timer_stack_min_bytes : -1);
+        cJSON_AddNumberToObject(crash_trace, "previous_pose_stack_min_bytes",
+                                valid && g_previous_live_crash_trace.pose_stack_min_bytes != UINT32_MAX
+                                    ? g_previous_live_crash_trace.pose_stack_min_bytes : -1);
+        cJSON_AddNumberToObject(crash_trace, "timer_stack_min_bytes",
+                                current_trace.timer_stack_min_bytes != UINT32_MAX
+                                    ? current_trace.timer_stack_min_bytes : -1);
+        cJSON_AddNumberToObject(crash_trace, "pose_stack_min_bytes",
+                                current_trace.pose_stack_min_bytes != UINT32_MAX
+                                    ? current_trace.pose_stack_min_bytes : -1);
+        cJSON_AddItemToObject(reply, "live_crash_trace", crash_trace);
+    }
     cJSON_AddBoolToObject(reply, "initialization_required", caps.initialization_required);
     cJSON_AddBoolToObject(reply, "right_arm_available", caps.right_arm_available);
     cJSON_AddBoolToObject(reply, "right_arm_initialized", caps.right_arm_initialized);
@@ -763,7 +824,9 @@ bool MotionLiveAdapter::HandleTransportMessage(int owner_id, cJSON* root,
         MotionLiveResult result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            RecordLiveCrashStage(kStageLivePose, false);
             result = robot_motion_runtime_.running() ? RuntimeBusyResult() : core_.Pose(owner_id, session_id, seq, target, speed_dps, NowMs());
+            g_live_crash_trace.stage = kStageIdle;
         }
         if (result.ok) {
             SendAck(sender, result);
