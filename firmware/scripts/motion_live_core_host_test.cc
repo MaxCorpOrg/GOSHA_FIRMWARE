@@ -12,6 +12,7 @@ using gosha::motion_live::MotionLiveCore;
 using gosha::motion_live::MotionLivePwmDiagnostics;
 using gosha::motion_live::MotionLivePreparedProfile;
 using gosha::motion_live::MotionLiveRuntimeConfig;
+using gosha::motion_live::MotionLiveResult;
 using gosha::motion_live::MotionLiveTarget;
 using gosha::motion_live::ServoSlot;
 using gosha::motion_live::kPoseJointCount;
@@ -1154,6 +1155,34 @@ int main() {
         auto editor_stop = editor_core.Stop(45, editor_armed.session_id, 15);
         CHECK(editor_stop.stopped);
         CHECK(!editor_core.IsArmed());
+
+        // The 50 ms watchdog tick must not eat the interval between editor
+        // POSE requests. At 5°/s, a +15° foot target takes about 3 seconds.
+        MotionLiveCore paced_editor =
+            ConfiguredCore(&editor_profile, ValidRuntime(true, false, kRightArmHomeDegrees));
+        paced_editor.SetRightArmInitializer([](int home_degrees) {
+            return home_degrees == 125;
+        });
+        paced_editor.SetHardwareApplier([](const std::array<int, kPoseJointCount>&) {
+            return true;
+        });
+        CHECK(paced_editor.InitializeRightArm(47, editor_profile.calibration_id, true).ok);
+        auto paced_arm = paced_editor.Arm(
+            47, editor_profile.calibration_id, true, "session_motion_editor_speed", 200000);
+        CHECK(paced_arm.ok);
+        MotionLiveResult paced_pose;
+        for (uint32_t seq = 1; seq <= 31; ++seq) {
+            const uint64_t now_ms = 200000 + seq * 100;
+            CHECK(!paced_editor.Tick(now_ms - 50).hardware_changed);
+            paced_pose = paced_editor.Pose(
+                47, paced_arm.session_id, seq, RightArmTarget(0, 0, 0, 15, 0), 5,
+                now_ms);
+            CHECK(paced_pose.ok);
+        }
+        CHECK(paced_pose.commanded_pose.relative_degrees[Joint(JointIndex::kFootPositiveX)] ==
+              15.0);
+        CHECK(paced_editor.Stop(47, paced_arm.session_id, 32).stopped);
+        CHECK(!paced_editor.Tick(203200).hardware_changed);
 
         MotionLivePreparedProfile narrowed_editor =
             MotionEditorProfile(-70.0, 45.0, kRightArmHomeDegrees);
