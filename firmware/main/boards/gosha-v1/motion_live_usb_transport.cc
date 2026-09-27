@@ -47,7 +47,9 @@ constexpr size_t kUsbReadChunkBytes = 128;
 constexpr TickType_t kUsbReadWaitTicks = pdMS_TO_TICKS(20);
 constexpr TickType_t kUsbWriteWaitTicks = pdMS_TO_TICKS(20);
 constexpr uint64_t kUsbWriteBudgetMs = 2000;
-constexpr uint32_t kUsbTaskStackBytes = 6144;
+// Upload finish nests the Live adapter, protocol, JSON validator and NVS store.
+// Its measured call frames approach the former 6144-byte task stack budget.
+constexpr uint32_t kUsbTaskStackBytes = 10240;
 constexpr UBaseType_t kUsbTaskPriority = 5;
 
 static_assert(kMotionLiveUsbMaxJsonBytes == 4096,
@@ -143,8 +145,15 @@ void HandleUsbJsonLine(const std::string& json) {
         return;
     }
 
+    const cJSON* op = cJSON_GetObjectItemCaseSensitive(root, "op");
+    const bool report_upload_stack = cJSON_IsString(op) && op->valuestring != nullptr &&
+        std::strcmp(op->valuestring, "package_upload_finish") == 0;
     bool write_failed = false;
-    MotionLiveJsonSender sender = [&write_failed](cJSON* reply) -> esp_err_t {
+    MotionLiveJsonSender sender = [&write_failed, report_upload_stack](cJSON* reply) -> esp_err_t {
+        if (report_upload_stack) {
+            cJSON_AddNumberToObject(reply, "usb_stack_free_min_bytes",
+                                    uxTaskGetStackHighWaterMark(nullptr));
+        }
         const esp_err_t ret = WriteUsbFrame(reply);
         if (ret != ESP_OK) {
             write_failed = true;

@@ -12,13 +12,26 @@ namespace gosha::motion_live {
 
 constexpr char kMotionPackageStoreSlotAKey[] = "motion_pkg_a";
 constexpr char kMotionPackageStoreSlotBKey[] = "motion_pkg_b";
+constexpr char kMotionPackageStoreSlotCKey[] = "motion_pkg_c";
+constexpr char kMotionPackageStoreSlotDKey[] = "motion_pkg_d";
 constexpr char kMotionPackageStoreActiveKey[] = "motion_pkg_act";
+constexpr char kMotionPackageStoreCatalogKey[] = "motion_pkg_idx";
+constexpr char kMotionPackageStoreMigrationKey[] = "motion_pkg_mig";
 static_assert(sizeof(kMotionPackageStoreSlotAKey) <= 16,
               "NVS key names must fit in 15 bytes plus terminator");
 static_assert(sizeof(kMotionPackageStoreSlotBKey) <= 16,
               "NVS key names must fit in 15 bytes plus terminator");
+static_assert(sizeof(kMotionPackageStoreSlotCKey) <= 16,
+              "NVS key names must fit in 15 bytes plus terminator");
+static_assert(sizeof(kMotionPackageStoreSlotDKey) <= 16,
+              "NVS key names must fit in 15 bytes plus terminator");
 static_assert(sizeof(kMotionPackageStoreActiveKey) <= 16,
               "NVS key names must fit in 15 bytes plus terminator");
+static_assert(sizeof(kMotionPackageStoreCatalogKey) <= 16,
+              "NVS key names must fit in 15 bytes plus terminator");
+static_assert(sizeof(kMotionPackageStoreMigrationKey) <= 16,
+              "NVS key names must fit in 15 bytes plus terminator");
+constexpr size_t kMotionPackageStoreLibraryLimit = 3;
 constexpr size_t kMotionPackageStoreMaxRecordBytes =
     kMotionPackageUploadMaxBytes + 256;
 
@@ -73,18 +86,18 @@ public:
     MotionPackageStoreResult DeleteById(const char* package_id);
 
 private:
-    enum class ActiveSlotStatus {
-        kFound,
-        kMissing,
-        kCorrupt,
+    struct Catalog {
+        uint8_t mask = 0;
+        uint8_t active = 0xff;
+        bool legacy = false;
     };
 
-    ActiveSlotStatus ReadActiveSlot(const char** active_slot);
+    MotionPackageStoreResult ReadCatalog(Catalog* catalog);
+    bool WriteCatalog(const Catalog& catalog);
     bool SlotExists(const char* slot);
     MotionPackageStoreResult LoadSlot(const char* slot,
                                       MotionPackageLoadedRecord* record);
-    const char* InactiveSlotFor(const char* active_slot) const;
-    bool WriteActiveSlot(const char* active_slot);
+    MotionPackageStoreResult ValidateCatalog(const Catalog& catalog);
 
     MotionPackageStoreBackend* backend_ = nullptr;
 };

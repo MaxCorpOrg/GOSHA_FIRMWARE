@@ -1360,7 +1360,10 @@ MotionLiveTickResult MotionLiveCore::Tick(uint64_t now_ms) {
             if (!StepTowardTarget(now_ms, &reason, &result.hardware_changed)) {
                 return DisarmForTick(reason);
             }
-        } else if (ProfileResetsMotionClockOnPassiveClock()) {
+        } else if (ProfileResetsMotionClockOnPassiveClock() && current_speed_dps_ <= 0.0) {
+            // Editor motion advances only on authenticated POSE requests.
+            // Do not erase their elapsed time on the 50 ms watchdog tick:
+            // doing so makes a requested 5°/s depend on tick/USB phase.
             last_motion_step_ms_ = now_ms;
         }
         return result;
